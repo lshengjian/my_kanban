@@ -241,7 +241,11 @@ snapshots/               数据快照（已 gitignore）
 
 ### 检查项与附件
 
-- 检查项（`checklistItems`）是**目标项的验收条件**，与任务表完全独立；可带可选的负责人与检查日期；文本上限 300。
+- 检查项（`checklistItems`）是**目标项的验收条件**，与任务表完全独立；文本上限 300。
+  **UI 里只保留文本**：不记检查人、也不记检查时间（`assigneeId` / `checkDate` 两个列仍在 schema 与
+  `addCheck` 入参里，属**已弃用但未删除**，服务端本来就把它们当可选参数）。
+  历史上那两个 `CHECK_ASSIGNEE_REQUIRED` / `CHECK_DATE_REQUIRED` 错误码**服务端早已不再抛出**
+  （只有客户端 `ERROR_MESSAGES` 还留着），已随这次改动一并删掉。
 - 附件上限 **20 MB**；`isImage` 由**服务端**按 content type 判定（png/jpeg/gif/webp/svg+xml/avif），客户端无法伪装。
 - 图片返回内联可渲染 URL；文档走 `getAttachmentUrl` 取一次性签名 URL 后下载。
 - `ctx.storage.delete` 是 best-effort（存储非事务），失败只留下孤儿 blob，不报错。
@@ -358,8 +362,9 @@ snapshots/               数据快照（已 gitignore）
   | 目标项 | `ProductList` 的单行输入框（**只在「待处理」列渲染**） | `GoalDrawer`（抽屉，选中即存） | `data.goalLabels` |
   | 任务项 | `NewTaskModal`（名称/负责人/期限/关联目标项） | `TaskEditor`（「未分类」可清空） | `data.labels` |
 
-  `GoalDrawer` 的字段是：标题 / 类别 / 客户价值估计 / 任务进展 / 检查列表 / 附件 —— **没有描述**
-  （见 §5 的「卡片不填描述」）。
+  `GoalDrawer` 的字段是：标题 / 类别 / 客户价值估计 / 检查列表 / 附件 —— **没有描述**
+  （见 §5 的「卡片不填描述」），**也没有任务进展统计**（不显示 N/M 个任务已完成、不带进度条；
+  目标的完成度看卡片所在列即可）。
 - `ProjectPage.tsx`：看板列表（栏目名 **项目看板**）、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
@@ -515,7 +520,10 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   要么补上 `createBoard` 的 description 参数，要么把这个输入框删掉。
 - `AttachmentSection` 把 `getAttachmentUrl` 这个 query 用 `useQuery(api.x, "skip")` + 强制类型转换当**一次性命令式函数**调用 —— 非常规但刻意。
 - 多处 mutation 缺 try/catch → 未处理的 rejection：`BoardPage` 的排序按钮、移出迭代、检查项 toggle/remove。
-- `GoalDrawer.save` 比对的是原始 `goal` prop 而非 `live`；`live` 只用于进度条。
+- **`checklistItems.assigneeId` / `checkDate` 是已弃用但未删除的字段**：UI 只保留检查项文本（见 §5）。
+  两列仍在 schema 与 `addCheck` / `updateCheck` 入参里，服务端一向把它们当可选参数。
+  要真正删列同样得按 §12 走。历史上配套的 `CHECK_ASSIGNEE_REQUIRED` / `CHECK_DATE_REQUIRED`
+  两个错误码已从 `ERROR_MESSAGES` 删除（服务端早就不抛它们了）。
 - `overdue` 在渲染时用 `Date.now()` 计算 → 页面常开不会自动翻转。
 - `SprintHeader` 内 `board.kind === "sprint" ? … : "skip"` 恒真（该组件只在 sprint 下渲染）。
 - `BoardPage` 早退 `if (!data) return "加载中…"` → 加载与错误不区分。

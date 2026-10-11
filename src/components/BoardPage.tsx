@@ -1173,9 +1173,6 @@ function GoalDrawer({
   const [labelId, setLabelId] = useState<string>(goal.labelId ?? "");
   const [error, setError] = useState<string | null>(null);
 
-  // Keep the live row so the progress bar tracks task changes while open.
-  const live = data.goals.find((g) => g._id === goal._id) ?? goal;
-
   // Saved on blur: the drawer is a live view, so there is no save button.
   const save = async () => {
     if (title.trim() === goal.title) return;
@@ -1272,23 +1269,7 @@ function GoalDrawer({
         </div>
         {error && <div className="error-text">{error}</div>}
 
-        {/* ---- 任务进展 ---- */}
-        <div className="field">
-          <label>任务进展</label>
-          <p className="muted" style={{ fontSize: 13 }}>
-            {live.taskDone}/{live.taskTotal} 个任务项已完成
-            {live.taskTotal > 0 && live.taskDone === live.taskTotal
-              ? " —— 全部完成，目标项已进入「已完成」"
-              : " —— 全部完成后目标项自动进入「已完成」"}
-          </p>
-          <ProgressBar
-            percent={
-              live.taskTotal === 0 ? 0 : Math.round((live.taskDone / live.taskTotal) * 100)
-            }
-          />
-        </div>
-
-        <CheckListSection token={token} goal={goal} members={data.members} />
+        <CheckListSection token={token} goal={goal} />
         <AttachmentSection token={token} goal={goal} />
       </div>
     </Drawer>
@@ -1302,37 +1283,24 @@ function GoalDrawer({
 function CheckListSection({
   token,
   goal,
-  members,
 }: {
   token: string;
   goal: Goal;
-  members: PublicUser[];
 }) {
   const checks = useQuery(api.attachments.listChecks, { token, goalId: goal._id });
   const add = useMutation(api.attachments.addCheck);
   const toggle = useMutation(api.attachments.toggleCheck);
   const remove = useMutation(api.attachments.deleteCheck);
   const [text, setText] = useState("");
-  const [assignee, setAssignee] = useState("");
-  const [date, setDate] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const nameOf = (id: Id<"users">) => members.find((m) => m._id === id)?.name ?? "未知";
-
+  // 检查项只保留文本：不记检查人，也不记检查时间。
   const submit = async () => {
     if (!text.trim()) return;
     setError(null);
     try {
-      await add({
-        token,
-        goalId: goal._id,
-        text,
-        assigneeId: assignee ? (assignee as Id<"users">) : undefined,
-        checkDate: date ? new Date(date).getTime() : undefined,
-      });
+      await add({ token, goalId: goal._id, text });
       setText("");
-      setAssignee("");
-      setDate("");
     } catch (err) {
       setError(describeError(err));
     }
@@ -1365,10 +1333,6 @@ function CheckListSection({
                 aria-label={item.text}
               />
               <span className={item.done ? "check-text done" : "check-text"}>{item.text}</span>
-              {item.assigneeId && <span className="badge">{nameOf(item.assigneeId)}</span>}
-              {item.checkDate !== undefined && (
-                <span className="badge">{formatDate(item.checkDate)}</span>
-              )}
               <button
                 className="icon-btn"
                 title="删除检查项"
@@ -1390,26 +1354,6 @@ function CheckListSection({
           onKeyDown={(e) => {
             if (e.key === "Enter") void submit();
           }}
-        />
-        <select
-          className="input"
-          value={assignee}
-          onChange={(e) => setAssignee(e.target.value)}
-          style={{ maxWidth: 130 }}
-        >
-          <option value="">检查人不指定</option>
-          {members.map((m) => (
-            <option key={m._id} value={m._id}>
-              {m.name}
-            </option>
-          ))}
-        </select>
-        <input
-          className="input"
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          style={{ maxWidth: 150 }}
         />
         <button className="btn" onClick={submit} disabled={!text.trim()}>
           添加

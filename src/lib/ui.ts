@@ -111,8 +111,6 @@ const ERROR_MESSAGES: Record<string, string> = {
   SPRINT_NOT_PLANNED: "只能排入尚未开始的迭代；已开始或已结束的迭代不能再加入目标项",
   NEW_GOAL_MUST_BE_PENDING: "新目标项只能加在「待处理」列；「处理中」需通过「排入迭代」进入",
   SPRINT_CLOSED: "该 Sprint 已结束，无法再排入",
-  CHECK_ASSIGNEE_REQUIRED: "Sprint 的检查项必须指定检查人",
-  CHECK_DATE_REQUIRED: "Sprint 的检查项必须设定检查时间",
   ASSIGNEE_REQUIRED: "排入 Sprint 前，请先为该需求指定负责人和截止日期",
   DUE_DATE_REQUIRED: "排入 Sprint 前，请先为该需求设定截止日期",
   PROJECT_OWNER_ONLY: "只有项目经理可以修改看板标签",
