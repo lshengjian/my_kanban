@@ -56,8 +56,10 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
 - `tsconfig.json` 是 `strict` + `noUnusedLocals` + `noUnusedParameters`，且 `include` 同时覆盖 `src` 与 `convex`
   （`convex/_generated` 被 exclude）。因此前后端同一次 typecheck。
 - Convex CLI 版本 1.46.0，位于 `node_modules/.bin/convex`；`node_modules` 中**没有 wrangler**，部署在仓库外工具链完成。
-- **无 `convex.json`、无 `convex/auth.config.ts`、无 `.env`**；只有 `.env.local`（已 gitignore）：
-  `CONVEX_DEPLOYMENT`、`VITE_CONVEX_URL`、`VITE_CONVEX_SITE_URL`。`.env.local` 指向的是**开发版**。
+- **无 `convex.json`、无 `convex/auth.config.ts`、无 `.env`**；环境变量只在 `.env.local`（已 gitignore）。
+  当前该文件里是 `CONVEX_DEPLOYMENT`、`VITE_CONVEX_URL`、`VITE_CONVEX_SITE_URL`；
+  可提交的模板见 `.env.local.example`（含客户端实际读取的 `VITE_CONVEX_URL_DEV` / `_PROD`）。
+  注意 `VITE_CONVEX_URL` 与 `VITE_CONVEX_SITE_URL` 客户端均已不读（见 §8）。
 - **本项目有两个 Convex deployment**（各自的数据库与账号完全独立，见 §9）：
 
   | | 开发测试环境 (dev) | 生产环境 (prod) |
@@ -79,6 +81,13 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
 ## 3. 目录结构
 
 ```
+根目录
+  AGENTS.md              本文件 —— 面向 Agent 的唯一事实来源
+  README.md              面向使用者的说明：功能、安装、部署、环境切换
+  .env.local.example     环境变量模板（可提交；.env.local 本身已 gitignore）
+  wrangler.toml          Cloudflare Pages 配置（name=kb-app，输出 dist/）
+  .aud.mjs               Playwright 巡检辅助（见 §10）
+  index.html / vite.config.ts / tsconfig.json / package.json
 convex/                  后端（Convex 函数 + 数据模型）
   schema.ts              全部 15 张表定义与索引 —— 改数据结构先改这里
   auth.ts                注册/登录/登出/me + 管理员用户管理
@@ -312,8 +321,11 @@ snapshots/               数据快照（已 gitignore）
   按 env 缓存到模块级 Map 里，来回切换最多只有 2 个 client。
 - 切换时 `writeToken(null)` 清掉旧 token（**会话只存在于签发它的那个 deployment**），
   再 `writeEnv` + `setEnv`，并以 `<App key={env}>` 强制重挂载，重置所有视图状态。
-- **后端地址不再是编译期唯一的**：`VITE_CONVEX_URL` 仍内联进 bundle，但运行时选择的是
-  `src/backend.ts` 里的 `BACKENDS[env].url`（可被 `VITE_CONVEX_URL_PROD` / `VITE_CONVEX_URL_DEV` 覆盖）。
+- **后端地址由运行时决定**：`BACKENDS[env].url`（`src/backend.ts`）是唯一来源，
+  可被 `VITE_CONVEX_URL_PROD` / `VITE_CONVEX_URL_DEV` 覆盖。
+  ⚠️ `.env.local` 里那个 `VITE_CONVEX_URL` **客户端已经不再读取**了 —— 它只剩
+  `scripts/project-snapshot.mjs` 拿它当 sanity gate。**改它不会切换后端**，要改的是上面两个变量
+  或 `BACKENDS` 本身。
 
 ### 组件分工
 
