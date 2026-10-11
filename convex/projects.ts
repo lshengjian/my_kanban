@@ -928,7 +928,7 @@ export const deleteProject = mutation({
     for (const row of checks) await ctx.db.delete(row._id);
 
     for (const board of boards) {
-      const [columns, goals, points] = await Promise.all([
+      const [columns, goals, points, boardLabels] = await Promise.all([
         ctx.db
           .query("columns")
           .withIndex("by_board", (q) => q.eq("boardId", board._id))
@@ -943,24 +943,42 @@ export const deleteProject = mutation({
             q.eq("scope", "sprint").eq("boardId", board._id),
           )
           .collect(),
+        // The board's own 卡片类型 vocabulary. Without this the rows survive with
+        // a dangling boardId, and `deleteLabel` can never remove them afterwards
+        // (its editor guard needs the board to still exist).
+        ctx.db
+          .query("labels")
+          .withIndex("by_board", (q) => q.eq("boardId", board._id))
+          .collect(),
       ]);
 
       for (const column of columns) await ctx.db.delete(column._id);
       for (const point of points) await ctx.db.delete(point._id);
       for (const goal of goals) await ctx.db.delete(goal._id);
+      for (const label of boardLabels) await ctx.db.delete(label._id);
       await ctx.db.delete(board._id);
     }
+
+    // Release-scope burn-down rows carry no boardId (they are keyed by 迭代),
+    // so the per-board sweep above cannot reach them; clear them by project.
+    const releasePoints = await ctx.db
+      .query("burndown")
+      .withIndex("by_project_scope", (q) =>
+        q.eq("projectId", args.projectId).eq("scope", "release"),
+      )
+      .collect();
+    for (const point of releasePoints) await ctx.db.delete(point._id);
 
     const [members, requests, logs] = await Promise.all([
       ctx.db
         .query("projectMembers")
         .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
         .collect(),
+      // Every request, not just the pending ones: approved/rejected rows still
+      // reference this project.
       ctx.db
         .query("joinRequests")
-        .withIndex("by_project_status", (q) =>
-          q.eq("projectId", args.projectId).eq("status", "pending"),
-        )
+        .withIndex("by_project_user", (q) => q.eq("projectId", args.projectId))
         .collect(),
       ctx.db
         .query("activityLog")

@@ -51,7 +51,7 @@ export default function AuthPage({
       <div className="auth-card">
         <div className="row" style={{ marginBottom: 4 }}>
           <span className="brand-mark">◆</span>
-          <span style={{ fontWeight: 700, letterSpacing: "-0.01em" }}>FlowBoard</span>
+          <span style={{ fontWeight: 700, letterSpacing: "-0.01em" }}>敏捷项目管理看板</span>
         </div>
         <h1>{mode === "login" ? "欢迎回来" : "创建账户"}</h1>
         <p className="auth-sub">

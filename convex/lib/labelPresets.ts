@@ -1,5 +1,6 @@
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { DEFAULT_LABELS } from "./constants";
 
 export const FALLBACK_LABEL_COLOR = "#64748b";
 
@@ -22,6 +23,8 @@ export function normalizeColor(raw: string | undefined | null): string {
  * first, so an 迭代's cards can be categorised the same way its product list
  * is. Only a project's first board falls back to the system presets — which
  * are written for software work and mean nothing to, say, a 迎评 project.
+ * With no system presets configured at all, the built-in `DEFAULT_LABELS` are
+ * used, so a board is never created with an empty 类别 list.
  */
 export async function seedDefaultLabels(
   ctx: MutationCtx,
@@ -44,23 +47,33 @@ export async function seedDefaultLabels(
   const sourceBoardId = projectBoards.find((b) => b._id !== board._id)?._id;
 
   const fromProject = sourceBoardId !== undefined;
-  const presets = fromProject
-    ? await ctx.db
-        .query("labels")
-        .withIndex("by_board_position", (q) => q.eq("boardId", sourceBoardId))
-        .collect()
-    : await ctx.db
-        .query("labels")
-        .withIndex("by_scope_kind_position", (q) =>
-          q.eq("scope", "system").eq("kind", board.kind),
-        )
-        .collect();
+  const presets: { name: string; color: string; position: number }[] = fromProject
+    ? (
+        await ctx.db
+          .query("labels")
+          .withIndex("by_board_position", (q) => q.eq("boardId", sourceBoardId))
+          .collect()
+      ).map((l) => ({ name: l.name, color: l.color, position: l.position }))
+    : (
+        await ctx.db
+          .query("labels")
+          .withIndex("by_scope_kind_position", (q) =>
+            q.eq("scope", "system").eq("kind", board.kind),
+          )
+          .collect()
+      ).map((l) => ({ name: l.name, color: l.color, position: l.position }));
+
+  // No administrator presets configured (a fresh deployment, or an admin who
+  // deleted them all) would otherwise leave the new board with an empty 类别
+  // list while the new-board dialog still previews DEFAULT_LABELS. Falling back
+  // here is what makes that preview honest.
+  const chosen =
+    presets.length > 0
+      ? presets
+      : DEFAULT_LABELS[board.kind].map((l, index) => ({ ...l, position: index }));
 
   const now = Date.now();
-  for (const preset of presets) {
-    // From the system: only rows marked scope="system" are presets. From a
-    // sibling board: every row there is already a project label.
-    if (!fromProject && preset.scope !== "system") continue;
+  for (const preset of chosen) {
     await ctx.db.insert("labels", {
       scope: "project",
       boardId: board._id,

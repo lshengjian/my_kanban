@@ -18,7 +18,9 @@
 - 后端：Convex 1.46（TypeScript 云函数 + 文档数据库 + 文件存储）
 - 部署：Cloudflare Pages（`wrangler.toml`，`name = "kb-app"`，产物目录 `dist/`）
 - 用户界面与所有文案：**简体中文**。代码注释、标识符：英文。
-- 品牌名不统一（已知问题）：`src/App.tsx` 显示 **My KanBan**，`AuthPage.tsx` 与 `dist/index.html` 标题为 **FlowBoard**，根 `index.html` 标题为「敏捷项目管理看板」。
+- 品牌名：登录页与页面标题都用「**敏捷项目管理看板**」（`AuthPage.tsx`、`index.html`）。
+  **唯一残留的不一致是应用内顶栏 `src/App.tsx` 仍写 "My KanBan"** —— 要统一就改那一处。
+  `localStorage` 的 key（`flowboard.token` / `flowboard.env`）是内部标识，不要为了改名而动它。
 
 ### 术语表（代码 ↔ 中文 ↔ 英文）
 
@@ -67,7 +69,15 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
   | deployment | `lsj1788:kanban:kanban-dev` | `lsj1788:kanban:production` |
   | URL | `https://fine-ibis-920.convex.cloud` | `https://coordinated-camel-303.convex.cloud` |
   | 选它的命令 | 默认（`.env.local`） | 加 `--prod` |
-  | 数据 | 当前全部历史数据 | 2026-10-11 初始化，**空库** |
+  | 数据 | **空库**（2026-10-12 清空） | **空库**（2026-10-12 清空） |
+
+  **2026-10-12：两个 deployment 的 15 张表都已清空（全部为 0 行）**，项目尚未正式启用。
+  清空前的完整快照在 `backups/2026-10-12T07-39-20/{dev,prod}.zip`（dev 23 KB / prod 12 KB），
+  需要时可用 `npx convex import [--prod] --replace <zip>` 恢复。
+  注意空库的两个后果：
+  1. **没有账号** → 第一个注册的人自动成为管理员（这是设计内的引导流程）。
+  2. **没有系统级预设** → 新看板的类别由内置 `DEFAULT_LABELS` 兜底（见 §5）。
+     「卡片类型」页此时显示"暂无预设，新建时将使用内置默认值"。
 
   `npx convex dev --once` 推 dev；`npx convex deploy` 推 prod —— 后者**必须交互确认**，
   非交互环境需要伪终端（见 §9）。
@@ -225,6 +235,10 @@ snapshots/               数据快照（已 gitignore）
 - **卡片只存 `labelId` 引用**，名称与颜色只存一份。删除标签时若有卡片引用 → `LABEL_IN_USE`；最后一个 → `CANNOT_DELETE_LAST_LABEL`。
 - 新建看板时**复制**词汇表：优先复制同项目其它看板的标签，只有项目第一个看板才回退到系统预设。
   → 管理员改预设**不会**改写已有卡片。
+- **系统预设为空时必须回退到内置词表**：`seedDefaultLabels` 在「没有兄弟看板可复制 + 系统预设为空」
+  （全新部署，或管理员把预设删光了）时，用 `constants.ts` 的 `DEFAULT_LABELS` 建出默认类别。
+  没有这个回退，新看板会**一个类别都没有**，而新建迭代弹窗还在预览那些默认值 —— 说一套做一套。
+  空库（见 §2）之后这条路径就是常态，改动 `seedDefaultLabels` 时不要把这层兜底删掉。
 - `normalizeColor` 只接受 `#rgb` / `#rrggbb`，其它一律回退 `#64748b`（客户端 `ColorPicker` 复用同一函数）。
 
 ### 进度与燃尽图（`progress.ts`, `lib/burndown.ts`）
@@ -427,7 +441,7 @@ snapshots/               数据快照（已 gitignore）
 | | dev | prod |
 | --- | --- | --- |
 | 推送命令 | `npx convex dev --once` | `npx convex deploy` |
-| 数据 | 全部历史数据 | 空库（2026-10-11 初始化） |
+| 数据 | **空库**（2026-10-12 清空，见 §2） | **空库**（2026-10-12 清空，见 §2） |
 | 错误信息 | 完整（含错误码与堆栈） | **被脱敏**（见 §11） |
 
 - `npx convex deploy` **强制交互确认**，非交互终端会直接失败（`Cannot prompt for input`）。
@@ -454,7 +468,7 @@ snapshots/               数据快照（已 gitignore）
 | `backup-deployments.sh` | **schema 变更前的强制备份**：dev + prod 全量导出 | 只读 | `bash scripts/backup-deployments.sh [--files]`（见 §12） |
 | `project-snapshot.mjs` | 备份/恢复示例项目（`复刻雷电游戏`） | backup 只读；**restore 用 `--replace` 整表覆盖** | `node scripts/project-snapshot.mjs backup [--project X]` / `... restore` |
 | `purge-except.mjs` | 只保留指定项目及其成员用户 | ⛔ **破坏性**，文件头声明 2026-10-10 起禁止对生产库使用 | `ALLOW_PURGE=1 node scripts/purge-except.mjs [项目名]`（未设 `ALLOW_PURGE=1` 直接 exit 1） |
-| `reset-data.sh` | 清空 13 张表（含遗留表 `items`/`labelTemplates`，清单已过期，见 §11）为了「首位注册用户即 admin」引导 | ⛔ **破坏性，无任何确认闸门** | `bash scripts/reset-data.sh` |
+| `reset-data.sh` | 清空 **15 张表**，为了「首位注册用户即 admin」引导 | ⛔ **破坏性，无确认闸门 —— 先跑 `backup-deployments.sh`** | `bash scripts/reset-data.sh [--prod]` |
 | `migrate-label-id.mjs` | 一次性：`labelTemplates` → `labels` 双 scope，`labelName` → `labelId` | ⛔ `--replace`；**必须在 schema 切换前跑，且已执行过，勿重跑** | `node scripts/migrate-label-id.mjs` |
 | `migrate-customer-value.mjs` | 一次性：`goals.storyPoints` → `goals.value` | 非破坏性（逐行调 `updateGoal`，不做 `--replace`）；**已执行过** | `CONVEX_URL=<url> node scripts/migrate-customer-value.mjs <token>` |
 | `.aud.mjs`（仓库根，未被 gitignore 覆盖） | Playwright 巡检辅助：底栏遮挡、横向溢出、左右越界、点击区 <32px | 只读 | `import { run } from "./.aud.mjs"`，`await run(page, label)` |
@@ -475,9 +489,6 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
 - ⚠️ **`.import-tmp.json` 含明文 session token**（7 行会话记录，键含 `token`）。它已被 gitignore，但**建议尽早删除**。
 - `snapshots/latest.json` 里存的是**绝对路径** `/Users/alex/workspace/kanban/snapshots/...`，
   与当前 checkout `/Users/alex/git_root/my_kanban` **不一致** → 直接 restore 会失败或读到另一份副本。
-- `scripts/reset-data.sh` 的表清单**已漂移**：仍含遗留表 `items`、`labelTemplates`，
-  却**不含** goals / tasks / goalTasks / attachments → 它并不会清空当前 schema 的目标项与任务项。
-  （snapshot 排除 burndown，purge 包含 burndown，三份清单互不一致。）
 - `.gitignore` 覆盖 `.env.local` `node_modules` `dist` `snapshots` `.import-tmp.json` `.wrangler`。
   `.aud.mjs` 与 `wrangler.toml` 既未被忽略、现已被跟踪（注意 `.aud.mjs` 是开发辅助脚本，会随源码公开）。
 
