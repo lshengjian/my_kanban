@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { DAY_MS, SPRINT_STATUS_META, TASK_STATUS_META } from "../../convex/lib/constants";
+import { DAY_MS, GOAL_COLUMNS, SPRINT_STATUS_META, TASK_STATUS_META } from "../../convex/lib/constants";
 import type { Attachment, BoardData, Goal, PublicUser, Task } from "./types";
 import { Drawer, Modal, ProgressBar, useToast } from "./ui";
 import BurndownChart from "./BurndownChart";
@@ -75,9 +75,6 @@ function ProductList({
     token ? { token, projectId: data.board.projectId } : "skip",
   );
   const [draft, setDraft] = useState<Record<string, string>>({});
-  // The 类别 picked for the next quick-added 目标项. Shared across columns on
-  // purpose: pick it once and keep adding, which is how the list gets filled.
-  const [draftLabel, setDraftLabel] = useState<string>("");
   const [planning, setPlanning] = useState<Goal | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,15 +82,17 @@ function ProductList({
   const sprintName = (id: Id<"boards">) =>
     sprints.find((s) => s._id === id)?.name ?? "迭代";
 
+  /**
+   * The product list is hand-filled from 待处理 only. A goal reaches 处理中 by
+   * being planned into an 迭代 and 已完成 by finishing its tasks, so offering an
+   * add box in those columns would let you write a state the board immediately
+   * contradicts. The server enforces the same rule.
+   */
+  const intakeColumnId = data.columns.find((c) => c.name === GOAL_COLUMNS[0])?._id;
+  /** New cards are name-only; 类别 is picked later in the goal's detail panel. */
   const add = async (columnId: Id<"columns">) => {
     const title = (draft[columnId] ?? "").trim();
     if (!title) return;
-    // 类别 is required, so refuse early with a reason instead of letting the
-    // server reject the call.
-    if (!draftLabel) {
-      setError("请先选择类别");
-      return;
-    }
     setDraft((d) => ({ ...d, [columnId]: "" }));
     try {
       setError(null);
@@ -102,7 +101,6 @@ function ProductList({
         boardId: data.board._id,
         columnId,
         title,
-        labelId: draftLabel as Id<"labels">,
       });
     } catch (err) {
       setError(describeError(err));
@@ -185,25 +183,8 @@ function ProductList({
                 </article>
               ))}
 
-              {!column.isDone && canAddGoals && (
+              {column._id === intakeColumnId && canAddGoals && (
                 <div className="quick-add">
-                  <select
-                    className="input"
-                    aria-label="新目标项的类别"
-                    title="新目标项的类别"
-                    value={draftLabel}
-                    onChange={(e) => {
-                      setDraftLabel(e.target.value);
-                      setError(null);
-                    }}
-                  >
-                    <option value="">选择类别 *</option>
-                    {data.labels.map((l) => (
-                      <option key={l._id} value={l._id}>
-                        {l.name}
-                      </option>
-                    ))}
-                  </select>
                   <input
                     className="input"
                     placeholder="＋ 新增目标项"
@@ -759,7 +740,6 @@ function NewTaskModal({
   const [assignee, setAssignee] = useState<string>(data.members[0]?._id ?? "");
   const [due, setDue] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [labelId, setLabelId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -776,10 +756,6 @@ function NewTaskModal({
       setError("每个任务项至少要关联一个目标项");
       return;
     }
-    if (!labelId) {
-      setError("请选择类别");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
@@ -790,7 +766,6 @@ function NewTaskModal({
         assigneeId: assignee as Id<"users">,
         dueDate: new Date(due).getTime(),
         goalIds: [...selected] as Id<"goals">[],
-        labelId: labelId as Id<"labels">,
       });
       onClose();
     } catch (err) {
@@ -844,25 +819,6 @@ function NewTaskModal({
           />
         </div>
         <div className="field">
-          <label htmlFor="tlabel">类别 *</label>
-          <select
-            id="tlabel"
-            className="input"
-            value={labelId}
-            onChange={(e) => setLabelId(e.target.value)}
-          >
-            <option value="">选择类别 *</option>
-            {data.labels.map((l) => (
-              <option key={l._id} value={l._id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-          {data.labels.length === 0 && (
-            <p className="hint">该看板还没有类别，请先到「卡片类型」新增一个。</p>
-          )}
-        </div>
-        <div className="field">
           <label>关联目标项 *（可多选）</label>
           {data.goals.length === 0 ? (
             <p className="muted">本迭代还没有目标项，请先从预期成果看板排入。</p>
@@ -889,7 +845,7 @@ function NewTaskModal({
           <button
             className="btn btn-primary"
             onClick={submit}
-            disabled={busy || !title.trim() || !due || !labelId}
+            disabled={busy || !title.trim() || !due}
           >
             {busy ? "创建中…" : "创建"}
           </button>
@@ -1213,6 +1169,9 @@ function GoalDrawer({
   const [title, setTitle] = useState(goal.title);
   const [description, setDescription] = useState(goal.description);
   const [value, setValue] = useState(goal.value?.toString() ?? "");
+  // `goalLabels`, not `labels`: a goal is always categorised from the 预期成果看板's
+  // vocabulary, and this drawer is reachable from an 迭代 board too.
+  const [labelId, setLabelId] = useState<string>(goal.labelId ?? "");
   const [error, setError] = useState<string | null>(null);
 
   // Keep the live row so the progress bar tracks task changes while open.
@@ -1247,6 +1206,21 @@ function GoalDrawer({
     }
   };
 
+  /** 类别 is optional, and chosen here rather than when the card is captured. */
+  const saveLabel = async (next: string) => {
+    setLabelId(next);
+    setError(null);
+    try {
+      await update({
+        token,
+        goalId: goal._id,
+        labelId: next ? (next as Id<"labels">) : null,
+      });
+    } catch (err) {
+      setError(describeError(err));
+    }
+  };
+
   return (
     <Drawer title={goal.title} onClose={onClose}>
       <div className="form-row">
@@ -1259,6 +1233,25 @@ function GoalDrawer({
             onChange={(e) => setTitle(e.target.value)}
             onBlur={save}
           />
+        </div>
+        <div className="field">
+          <label htmlFor="glabel">类别</label>
+          <select
+            id="glabel"
+            className="input"
+            value={labelId}
+            onChange={(e) => void saveLabel(e.target.value)}
+          >
+            <option value="">未分类</option>
+            {data.goalLabels.map((l) => (
+              <option key={l._id} value={l._id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+          <span className="faint" style={{ fontSize: 11.5 }}>
+            设为类别后，卡片名称前会显示该类别颜色的方块
+          </span>
         </div>
         <div className="field">
           <label htmlFor="gvalue">客户价值估计（1~10）</label>

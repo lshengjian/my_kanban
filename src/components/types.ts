@@ -96,7 +96,13 @@ export type BoardData = {
   columns: GoalColumn[];
   lanes: TaskLane[];
   goals: Goal[];
+  /** This board's own vocabulary — categorises its 任务项 (and its 目标项 on the 预期成果看板). */
   labels: BoardLabel[];
+  /**
+   * The vocabulary 目标项 are categorised from. On an 迭代 board this is the
+   * 预期成果看板's list, because a goal always belongs to the product list.
+   */
+  goalLabels: BoardLabel[];
   members: PublicUser[];
   counts: {
     goals: number;

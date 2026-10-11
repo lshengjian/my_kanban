@@ -1905,15 +1905,6 @@ label { font-size: 0.875rem; }
    before the text it annotates. */
 .card-title .label-square { margin-right: 6px; }
 
-/* The 产品经理 now picks a 类别 before typing, so the quick-add is a
-   two-control stack rather than a single input. */
-.quick-add {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.quick-add select { font-size: 12.5px; }
-
 /* ---- backend (Convex deployment) switcher on the sign-in screen --------
    The app has a 开发测试环境 and a 生产环境 backend; this picks which one the
    client talks to. Set apart from the sign-in form so it reads as a settings

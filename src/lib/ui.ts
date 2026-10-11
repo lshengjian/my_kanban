@@ -109,6 +109,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   NOT_A_SPRINT: "该操作仅适用于敏捷项目管理看板",
   INVALID_SPRINT_RANGE: "结束日期必须晚于开始日期",
   SPRINT_NOT_PLANNED: "只能排入尚未开始的迭代；已开始或已结束的迭代不能再加入目标项",
+  NEW_GOAL_MUST_BE_PENDING: "新目标项只能加在「待处理」列；「处理中」需通过「排入迭代」进入",
   SPRINT_CLOSED: "该 Sprint 已结束，无法再排入",
   CHECK_ASSIGNEE_REQUIRED: "Sprint 的检查项必须指定检查人",
   CHECK_DATE_REQUIRED: "Sprint 的检查项必须设定检查时间",

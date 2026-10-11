@@ -10,7 +10,7 @@ import {
   requireUser } from "./lib/auth";
 import { columnsOfBoard } from "./lib/board";
 import { recordReleaseBurndown, recordSprintBurndown } from "./lib/burndown";
-import { TASK_LANES, deriveSprintStatus } from "./lib/constants";
+import { GOAL_COLUMNS, TASK_LANES, deriveSprintStatus } from "./lib/constants";
 
 const MAX_TITLE = 160;
 
@@ -120,9 +120,9 @@ export const createGoal = mutation({
     columnId: v.optional(v.id("columns")),
     title: v.string(),
     description: v.optional(v.string()),
-    // 类别 is mandatory at creation: every new card is categorised, so the
-    // board can be scanned by colour. Editing may still clear it.
-    labelId: v.id("labels"),
+    // 类别 is optional: a 目标项 is captured by name first and categorised
+    // later from its detail panel.
+    labelId: v.optional(v.id("labels")),
     position: v.optional(v.number()),
     /** 客户价值估计 — 1~10 的相对价值刻度，发布燃尽图的纵轴单位。 */
     value: v.optional(v.number()),
@@ -144,6 +144,13 @@ export const createGoal = mutation({
       ? (await columnsOfBoard(ctx, args.boardId)).find((c) => c._id === args.columnId)
       : (await columnsOfBoard(ctx, args.boardId))[0];
     if (!column) throw new Error("COLUMN_NOT_FOUND");
+    // A goal reaches 处理中 only by being planned into an 迭代, and 已完成 only
+    // by finishing its tasks. The product list is therefore hand-filled from
+    // 待处理 alone — creating a card straight into a later column would store a
+    // state the derivation rule immediately contradicts.
+    if (column.isDone || column.name !== GOAL_COLUMNS[0]) {
+      throw new Error("NEW_GOAL_MUST_BE_PENDING");
+    }
 
     const now = Date.now();
     const goalId = await ctx.db.insert("goals", {
@@ -579,8 +586,9 @@ export const createTask = mutation({
     assigneeId: v.id("users"),
     dueDate: v.number(),
     goalIds: v.array(v.id("goals")),
-    /** 类别 is mandatory at creation — see the note on `createGoal`. */
-    labelId: v.id("labels"),
+    // 类别 is optional and comes from the 迭代's own vocabulary — a task's
+    // category is not the goal's. Set later, from the task detail panel.
+    labelId: v.optional(v.id("labels")),
   },
   returns: v.id("tasks"),
   handler: async (ctx, args) => {

@@ -163,10 +163,16 @@ snapshots/               数据快照（已 gitignore）
 - **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；它的状态列完全由任务派生。
 - **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
 - 一个任务可以服务多个目标项（`goalTasks` 多对多）。
-- **类别（`labelId`）在「新建」时必填**：目标项用产品列表每列顶部的类别下拉框（`.quick-add`，一次选定后跨列粘住），
-  任务项用「新增任务项」弹窗。服务端 `createGoal` / `createTask` 的 validator 已把 `labelId` 收紧为必填。
-  编辑时仍允许清空（`updateGoal` / `updateTask` 接受 `null`）—— 约束只加在创建上。
-- 卡片上的类别**只以颜色小方框呈现**（`LabelSquare` / `.label-square`），**不再显示类别名文字**；
+- **新建卡片只要名称，类别后置**：新增目标项只有一个名称输入框；新增任务项只收名称 / 负责人 /
+  预计完成日期 / 关联目标项。类别在**详情面板**里设置 —— 目标项在 `GoalDrawer`，任务项在 `TaskEditor`，
+  两边都**可选**（下拉里有「未分类」）。服务端 `createGoal` / `createTask` 的 `labelId` 因此是可选参数。
+- **目标项的类别与任务项的类别是两套词表，不要混用**：`labels` 属于**单个看板**（`labels.boardId`）。
+  目标项永远活在预期成果看板，所以它的类别只能取自**该看板**的词表；任务项的类别取自
+  **它所在那个迭代自己的**词表。因此 `getBoard` 同时返回两个列表：
+  `labels`（当前看板，供任务项）与 `goalLabels`（预期成果看板的，供目标项）。
+  `GoalDrawer` 在迭代看板上也能被打开，必须用 `goalLabels`，否则 `labelOfBoard` 会以
+  `LABEL_NOT_ON_BOARD` 拒绝。
+- 卡片上的类别**只以颜色小方框呈现**（`LabelSquare` / `.label-square`），**没设类别就不显示方块**；
   类别名通过方块的 `title` 提示与详情面板可见。
 
 ### 目标项状态派生（`goals.ts: syncGoalStatus` / `isGoalComplete`）
@@ -178,6 +184,9 @@ snapshots/               数据快照（已 gitignore）
 ```
 
 - **空任务集不算完成**（否则新建目标项会立刻"已完成"）。这是刻意的，不要"修复"。
+- **手工新增只能落在「待处理」**：服务端 `createGoal` 拒绝把新目标项建到 处理中 / 已完成
+  （`NEW_GOAL_MUST_BE_PENDING`），客户端也只在「待处理」列渲染新增框。
+  否则会写进一个与派生规则立刻矛盾的列状态（处理中却没有 `sprintId`）。
 - 状态列只在服务端派生写入，客户端**不允许**把目标项拖到别的列。
 - 任何影响任务的改动后都会重算目标项状态并刷新燃尽图。
 
@@ -288,6 +297,10 @@ snapshots/               数据快照（已 gitignore）
   `generateUploadUrl` `createAttachment` `listAttachments` `getAttachmentUrl` `deleteAttachment`
 - **progress.ts**：`getProjectProgress` `getSprintBurndown` `getReleaseBurndown` `snapshotBurndown`（另 re-export `columnsOfBoard`）
 
+- 两个契约细节（改之前先读 §5）：
+  `createGoal` / `createTask` 的 `labelId` 是**可选**参数（新建只给名称，类别后置）；
+  `boards.getBoard` 同时返回 `labels`（本看板词表，供任务项）与 `goalLabels`（预期成果看板词表，供目标项）。
+
 `convex/lib/` 下的模块**必须保持前后端无关**（`constants.ts` 被前端直接 import），不要引入服务端专属依赖。
 `password.ts` 是纯 TS 的 PBKDF2-HMAC-SHA256：因为 Convex 的 V8 isolate 不保证有 `crypto.subtle`，
 且 `"use node"` 模块不能被同时导出 query/mutation 的文件 import —— 这是刻意的实现，不要换成原生 crypto。
@@ -329,11 +342,16 @@ snapshots/               数据快照（已 gitignore）
 
 ### 组件分工
 
-- `BoardPage.tsx`（1554 行，最复杂）：`ProductList`、`PlanModal`、`IterationView`、`TaskCard`、`TaskEditor`、
+- `BoardPage.tsx`（最复杂的一个文件）：`ProductList`、`PlanModal`、`IterationView`、`TaskCard`、`TaskEditor`、
   `TimeModal`、`NewTaskModal`、`EffortStats`、`SprintHeader`、`BoardTabs`、`GoalDrawer`、
   `CheckListSection`、`AttachmentSection`。唯一数据源是 `api.boards.getBoard`。
-  文件顶部有 `LabelSquare`（类别颜色小方框）与 `findLabel`（按 `labelId` 解析类别）两个共享小工具，
-  卡片显示类别一律走它们。
+  文件顶部有 `LabelSquare`（类别颜色小方框，**无类别时返回 null**）与 `findLabel`（按 `labelId` 解析类别）
+  两个共享小工具，卡片显示类别一律走它们。
+  类别在哪里改（**新建时都不问类别**）：
+  | 卡片 | 新建 | 修改类别 | 用哪套词表 |
+  | --- | --- | --- | --- |
+  | 目标项 | `ProductList` 的单行输入框（**只在「待处理」列渲染**） | `GoalDrawer`（抽屉，选中即存） | `data.goalLabels` |
+  | 任务项 | `NewTaskModal`（名称/负责人/期限/关联目标项） | `TaskEditor`（「未分类」可清空） | `data.labels` |
 - `ProjectPage.tsx`：看板列表（栏目名 **项目看板**）、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。

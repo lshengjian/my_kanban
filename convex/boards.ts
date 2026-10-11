@@ -181,6 +181,19 @@ export const getBoard = query({
         position: v.number(),
       }),
     ),
+    /**
+     * The vocabulary 目标项 are categorised from. A goal always lives in the
+     * project's 预期成果看板, so on an 迭代 board this differs from `labels`
+     * (which is that 迭代's own vocabulary, used by its 任务项).
+     */
+    goalLabels: v.array(
+      v.object({
+        _id: v.id("labels"),
+        name: v.string(),
+        color: v.string(),
+        position: v.number(),
+      }),
+    ),
     columns: v.array(
       v.object({
         _id: v.id("columns"),
@@ -305,6 +318,19 @@ export const getBoard = query({
     const memberUsers = await Promise.all(memberRows.map((m) => ctx.db.get(m.userId)));
     const members = memberUsers.filter((m) => m !== null).map((m) => publicUser(m));
 
+    // 目标项 are categorised from the product list's vocabulary even when this
+    // board is an 迭代 — the goal editor is reachable from both, and labels
+    // belong to a single board (`labelOfBoard` rejects a foreign one).
+    const goalLabels =
+      board.kind === "backlog"
+        ? labels
+        : backlogBoard
+          ? await ctx.db
+              .query("labels")
+              .withIndex("by_board_position", (q) => q.eq("boardId", backlogBoard._id))
+              .collect()
+          : [];
+
     const lanes = TASK_LANES.map((lane) => ({
       status: lane.status,
       name: lane.name,
@@ -343,6 +369,12 @@ export const getBoard = query({
         archived: board.archived,
       },
       labels: labels.map((l) => ({
+        _id: l._id,
+        name: l.name,
+        color: l.color,
+        position: l.position,
+      })),
+      goalLabels: goalLabels.map((l) => ({
         _id: l._id,
         name: l.name,
         color: l.color,
