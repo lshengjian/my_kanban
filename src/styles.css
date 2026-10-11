@@ -1913,3 +1913,31 @@ label { font-size: 0.875rem; }
   gap: 6px;
 }
 .quick-add select { font-size: 12.5px; }
+
+/* ---- backend (Convex deployment) switcher on the sign-in screen --------
+   The app has a 开发测试环境 and a 生产环境 backend; this picks which one the
+   client talks to. Set apart from the sign-in form so it reads as a settings
+   control rather than part of the login flow. */
+.env-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.env-bar label {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.env-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+.env-hint {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}

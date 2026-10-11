@@ -5,3 +5,8 @@ snapshots
 .import-tmp.json
 .wrangler
 
+# Convex deployment backups. These contain live data — including the
+# `sessions` table, i.e. plaintext bearer tokens — and this repo is PUBLIC.
+# Never commit them.
+backups
+

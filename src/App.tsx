@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { readToken, writeToken } from "./session";
+import type { EnvKey } from "./backend";
 import AuthPage from "./components/AuthPage";
 import AccountPage from "./components/AccountPage";
 import ProjectsPage from "./components/ProjectsPage";
@@ -20,7 +21,14 @@ type View =
   | { kind: "presets" }
   | { kind: "account" };
 
-export default function App() {
+export default function App({
+  env,
+  onChangeEnv,
+}: {
+  /** Which Convex deployment is in use; only the sign-in screen can change it. */
+  env: EnvKey;
+  onChangeEnv: (env: EnvKey) => void;
+}) {
   const [token, setToken] = useState<string | null>(() => readToken());
   const [view, setView] = useState<View>({ kind: "projects" });
   const [booting, setBooting] = useState(true);
@@ -69,7 +77,13 @@ export default function App() {
   }
 
   if (!token || !me) {
-    return <AuthPage onAuthenticated={(t) => setToken(t)} />;
+    return (
+      <AuthPage
+        env={env}
+        onChangeEnv={onChangeEnv}
+        onAuthenticated={(t) => setToken(t)}
+      />
+    );
   }
 
   const isAdmin = me.role === "admin";

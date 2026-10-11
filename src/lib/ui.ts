@@ -135,5 +135,27 @@ export function describeError(err: unknown): string {
   // match on containment rather than equality.
   const hit = Object.entries(ERROR_MESSAGES).find(([code]) => raw.includes(code));
   if (hit) return hit[1];
-  return raw.replace(/^.*Uncaught Error:\s*/, "").split("\n")[0]!.trim() || "操作失败";
+
+  // A *production* Convex deployment redacts the text of thrown errors, so the
+  // only thing that arrives is the transport scaffolding:
+  //   "[CONVEX M(auth:login)] [Request ID: …] Server Error\n  Called by client"
+  // Strip that, and when nothing but a generic "Server Error" survives, show a
+  // message a user can act on instead of leaking request ids. Fixing this
+  // properly means throwing ConvexError (see AGENTS.md §11).
+  const stripped = raw
+    .replace(/\[CONVEX [^\]]*\]\s*/g, "")
+    .replace(/\[Request ID:[^\]]*\]\s*/g, "")
+    .replace(/^.*Uncaught Error:\s*/, "")
+    .split("\n")[0]!
+    .trim();
+
+  if (!stripped || /^(server error|called by client)\.?$/i.test(stripped)) {
+    // Surface an *unregistered* code on the console so a missing
+    // ERROR_MESSAGES entry is diagnosable, while the user still sees something
+    // actionable. A redacted production error has no code at all.
+    const code = raw.match(/Uncaught Error:\s*([A-Z][A-Z0-9_]{2,})/)?.[1];
+    if (code) console.warn(`[describeError] 未登记的错误码：${code}`);
+    return "操作失败，请重试";
+  }
+  return stripped;
 }

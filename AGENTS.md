@@ -2,7 +2,9 @@
 
 > **本文件是项目的唯一事实来源（single source of truth）。**
 > 开始任何任务前先读本文件，不要重新逐文件通读源码。
-> **每次改动代码后，必须回来同步本文件对应章节**（见文末「维护约定」）。
+> **每次改动代码后，必须回来同步本文件对应章节**（见 §13「维护约定」）。
+> ⚠️ **要改数据表结构（`convex/schema.ts`）？先读 §12 的强制流程** —— 必须先备份 dev + prod 两个
+> deployment，再推送，最后按需导入数据。
 
 ---
 
@@ -54,8 +56,19 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
 - `tsconfig.json` 是 `strict` + `noUnusedLocals` + `noUnusedParameters`，且 `include` 同时覆盖 `src` 与 `convex`
   （`convex/_generated` 被 exclude）。因此前后端同一次 typecheck。
 - Convex CLI 版本 1.46.0，位于 `node_modules/.bin/convex`；`node_modules` 中**没有 wrangler**，部署在仓库外工具链完成。
-- **无 `convex.json`、无 `convex/auth.config.ts`、无 `.env`**；只有 `.env.local`（已 gitignore，6 行）：
-  `CONVEX_DEPLOYMENT`、`VITE_CONVEX_URL`、`VITE_CONVEX_SITE_URL`。当前 deployment 为 `dev:fine-ibis-920`。
+- **无 `convex.json`、无 `convex/auth.config.ts`、无 `.env`**；只有 `.env.local`（已 gitignore）：
+  `CONVEX_DEPLOYMENT`、`VITE_CONVEX_URL`、`VITE_CONVEX_SITE_URL`。`.env.local` 指向的是**开发版**。
+- **本项目有两个 Convex deployment**（各自的数据库与账号完全独立，见 §9）：
+
+  | | 开发测试环境 (dev) | 生产环境 (prod) |
+  | --- | --- | --- |
+  | deployment | `lsj1788:kanban:kanban-dev` | `lsj1788:kanban:production` |
+  | URL | `https://fine-ibis-920.convex.cloud` | `https://coordinated-camel-303.convex.cloud` |
+  | 选它的命令 | 默认（`.env.local`） | 加 `--prod` |
+  | 数据 | 当前全部历史数据 | 2026-10-11 初始化，**空库** |
+
+  `npx convex dev --once` 推 dev；`npx convex deploy` 推 prod —— 后者**必须交互确认**，
+  非交互环境需要伪终端（见 §9）。
 - Git：远端 `origin` = `git@github.com:lshengjian/my_kanban.git`，分支 `main`，全部源码已跟踪并推送。
   历史：`08f75c2 Initial commit`（仅 LICENSE）→ `4eed5fa`（首个完整源码提交）。
   **⚠️ 该仓库是 public 的** —— 提交前务必确认没有把密钥、`.env.local`、`.import-tmp.json`、`snapshots/` 带进去
@@ -86,7 +99,8 @@ convex/                  后端（Convex 函数 + 数据模型）
     board.ts             columnsOfBoard
   _generated/            Convex 生成物，不要手改；schema 变更后由 convex dev 重新生成
 src/
-  main.tsx               ErrorBoundary → ConvexProvider → App
+  main.tsx               Root：按 env 选 Convex client → ConvexProvider → App
+  backend.ts             两个后端（prod/dev）的 URL、标签、localStorage 记忆、client 缓存
   App.tsx                视图状态机（无路由库）+ 顶栏/底栏
   session.ts             localStorage 里的 token（key: "flowboard.token"）
   styles.css             全部样式（约 1915 行，见 §8）
@@ -100,6 +114,8 @@ src/
     AuthPage / AccountPage / AdminPage / PresetPage
     LabelManager / TemplateEditor / ColorPicker / BurndownChart / ErrorBoundary
 scripts/                 运维脚本（多数具破坏性，见 §10）
+  backup-deployments.sh  【强制】schema 变更前备份 dev + prod（见 §12）
+backups/                 备份产物（**已 gitignore**：含 sessions 明文 token）
 snapshots/               数据快照（已 gitignore）
 ```
 
@@ -284,12 +300,20 @@ snapshots/               数据快照（已 gitignore）
 - 会话失效（`me === null`）会清 token 并退回登录页；`booting` 期间显示「加载中…」。
 - `BoardPage` 需要 `isProjectOwner`，由 `App` 从 `listMyProjects` 首页推导（超出首页范围时降级为只读）。
 
-### 入口与错误边界
+### 入口、后端切换与错误边界
 
-`src/main.tsx`：`React.StrictMode` → `ErrorBoundary` → `ConvexProvider` → `App`。
+`src/main.tsx`：`React.StrictMode` → `ErrorBoundary` → `Root` → `ConvexProvider` → `App`。
 **ErrorBoundary 包在 Provider 外层**（故意的），这样任何 query 抛出都不会白屏。
-`new ConvexReactClient(import.meta.env.VITE_CONVEX_URL)`；该值在 `vite build` 时被**内联进 bundle**，
-所以部署产物的后端地址是编译期固定的（改后端必须重新构建）。
+
+`Root`（main.tsx 内）持有「当前后端」这一状态，是整套切换机制的所在地：
+
+- `clientFor(env)`（`src/backend.ts`）按 env 返回缓存的 `ConvexReactClient`；
+  **client 不能建在组件 effect 里** —— React StrictMode 会双挂载 effect，而每个 client 握着 websocket。
+  按 env 缓存到模块级 Map 里，来回切换最多只有 2 个 client。
+- 切换时 `writeToken(null)` 清掉旧 token（**会话只存在于签发它的那个 deployment**），
+  再 `writeEnv` + `setEnv`，并以 `<App key={env}>` 强制重挂载，重置所有视图状态。
+- **后端地址不再是编译期唯一的**：`VITE_CONVEX_URL` 仍内联进 bundle，但运行时选择的是
+  `src/backend.ts` 里的 `BACKENDS[env].url`（可被 `VITE_CONVEX_URL_PROD` / `VITE_CONVEX_URL_DEV` 覆盖）。
 
 ### 组件分工
 
@@ -301,6 +325,9 @@ snapshots/               数据快照（已 gitignore）
 - `ProjectPage.tsx`：看板列表（栏目名 **项目看板**）、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
+- `AuthPage.tsx`：登录/注册 + **「后端数据」切换器**（`环境` 只在这里能改）。
+  切换写在登录页而不是设置页是**故意的** —— 两个 deployment 的账号互不相通，所以换后端必然要重新登录。
+  切换器下方显示当前 deployment 主机名，避免"看不出自己在哪个库"。
 - `AdminPage.tsx` 用户管理；`PresetPage.tsx` + `TemplateEditor.tsx` 管理员维护系统预设；
   `LabelManager.tsx` 看板内卡片类型管理（`canManage` 由 owner 决定，非 owner 见「仅项目经理可修改」）。
 
@@ -324,7 +351,7 @@ snapshots/               数据快照（已 gitignore）
   **新增 token 必须同时写进两个 `:root` 块。**
 - 移动优先：断点 760px（主）+ 720px + 420px + `prefers-reduced-motion`。**没有 min-width 桌面优先查询。**
 - 结构是**追加式**：前 ~1370 行是基础表，之后是按注释分段叠加的覆盖层（2024 refresh / Mobile /
-  Device-adaptive navigation / iPhone 16 fixes / burndown / **Card categories**）。
+  Device-adaptive navigation / iPhone 16 fixes / burndown / **Card categories** / **backend switcher**）。
   → **新规则追加到文件末尾并写注释段**，不要回头改前面的规则。
 - 颜色只能来自 token 或 `color-mix(...)`；仅 JS 侧调色板（`LABEL_PALETTE`、`AVATAR_COLORS`）是硬编码 hex。
 - `.tabbar` 在 760px 以上隐藏，以下是固定底栏，**故意 `z-index: 50`**（低于 `.overlay` 的 60）。
@@ -340,16 +367,40 @@ snapshots/               数据快照（已 gitignore）
 
 ## 9. 部署
 
+### 前端（Cloudflare Pages）
+
 - `wrangler.toml`：`name = "kb-app"`，`compatibility_date = "2024-11-01"`，`pages_build_output_dir = "dist"`。
   无 `[env]` / routes / vars。
 - SPA 回退规则**不在 wrangler.toml**，而在 `public/_redirects`：`/*  /index.html  200`，Vite 会原样拷进 `dist/`。
-- 流程：`npm run build` → 用 Cloudflare Pages（或 wrangler，需另行安装）上传 `dist/`。
-- **前端与后端是两个独立部署**：`convex/` 下的函数改动不会随 `pages.dev` 生效，
-  必须推送到 Convex deployment（本地 `npx convex dev` 会持续推送，生产用 `npx convex deploy`）。
-  只改前端时，若 `convex/*` 的 args 校验器被收紧（例如 `labelId` 由可选变必填），
-  旧后端仍按旧校验器运行 —— 前端必须只发送旧后端也认识的字段，否则会 validation error。
-  `npx convex function-spec` 可以**只读**查看线上 deployment 真实生效的 args/returns 校验器。
+- 部署：`npm run build` → `wrangler pages deploy dist --project-name=kb-app --branch=main`
+  （wrangler 是**全局**安装的，不在 `node_modules`；需要 `wrangler login`，凭证在 `~/Library/Preferences/.wrangler`）。
+- 验证：拉生产域名看 bundle 哈希是否等于本地 `dist/assets/`，再核对关键文案（不要只看 HTTP 200）。
 - `dist/` 是本地构建产物（已 gitignore，文件名哈希随构建变化），**不要当源码用、也不要提交**。
+
+### 后端（两个 Convex deployment）
+
+前端与后端是**两个独立部署**，`convex/` 的改动不会随 `pages.dev` 生效。
+
+| | dev | prod |
+| --- | --- | --- |
+| 推送命令 | `npx convex dev --once` | `npx convex deploy` |
+| 数据 | 全部历史数据 | 空库（2026-10-11 初始化） |
+| 错误信息 | 完整（含错误码与堆栈） | **被脱敏**（见 §11） |
+
+- `npx convex deploy` **强制交互确认**，非交互终端会直接失败（`Cannot prompt for input`）。
+  绕过办法是分配伪终端并把确认喂进去：
+
+  ```bash
+  ( sleep 6; printf 'y\n'; sleep 90 ) | script -q /dev/null npx convex deploy
+  ```
+
+  注意 `script` 必须先 sleep 再送输入，否则 `y` 会在提示出现前被吃掉、**静默不推送**（退出码仍为 0，需靠
+  `auth:me` 是否返回 success 来确认）。
+- 只改前端时，若 `convex/*` 的 args 校验器被收紧（例如 `labelId` 由可选变必填），
+  **旧后端仍按旧校验器运行**，所以线上旧前端可能先崩 —— 顺序上应「先前端、后后端」。
+- `npx convex function-spec` 可以**只读**查看线上 deployment 真实生效的 args/returns 校验器
+  （判断某字段是否必填的最快手段）。
+- `npx convex export --prod` / `npx convex import --prod` 分别针对产品版。
 
 ---
 
@@ -357,6 +408,7 @@ snapshots/               数据快照（已 gitignore）
 
 | 脚本 | 用途 | 破坏性 | 用法 |
 | --- | --- | --- | --- |
+| `backup-deployments.sh` | **schema 变更前的强制备份**：dev + prod 全量导出 | 只读 | `bash scripts/backup-deployments.sh [--files]`（见 §12） |
 | `project-snapshot.mjs` | 备份/恢复示例项目（`复刻雷电游戏`） | backup 只读；**restore 用 `--replace` 整表覆盖** | `node scripts/project-snapshot.mjs backup [--project X]` / `... restore` |
 | `purge-except.mjs` | 只保留指定项目及其成员用户 | ⛔ **破坏性**，文件头声明 2026-10-10 起禁止对生产库使用 | `ALLOW_PURGE=1 node scripts/purge-except.mjs [项目名]`（未设 `ALLOW_PURGE=1` 直接 exit 1） |
 | `reset-data.sh` | 清空 13 张表（含遗留表 `items`/`labelTemplates`，清单已过期，见 §11）为了「首位注册用户即 admin」引导 | ⛔ **破坏性，无任何确认闸门** | `bash scripts/reset-data.sh` |
@@ -366,6 +418,10 @@ snapshots/               数据快照（已 gitignore）
 
 **备份格式**：`snapshots/<项目名>-YYYY-MM-DDTHH-MM-SS.json`（24 份 + `latest.json` 指针），
 顶层 `savedAt` / `project` / `userIds` / `tables`（14 张表，**不含 burndown**）。
+
+**全量备份格式**（`backup-deployments.sh` 的产物）：`backups/<时间戳>/{dev,prod}.zip`，
+Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文档，含表定义行）。
+**`backups/` 必须保持 gitignore** —— 里面有 `sessions` 表的明文 bearer token 和成员邮箱，而本仓库是公开的。
 
 ---
 
@@ -381,6 +437,28 @@ snapshots/               数据快照（已 gitignore）
   （snapshot 排除 burndown，purge 包含 burndown，三份清单互不一致。）
 - `.gitignore` 覆盖 `.env.local` `node_modules` `dist` `snapshots` `.import-tmp.json` `.wrangler`。
   `.aud.mjs` 与 `wrangler.toml` 既未被忽略、现已被跟踪（注意 `.aud.mjs` 是开发辅助脚本，会随源码公开）。
+
+**后端**
+
+- ⚠️ **产品版会脱敏错误信息，导致前端错误文案全部失效。**
+  dev 抛 `throw new Error("INVALID_EMAIL")` 时客户端能收到错误码；**prod 只会收到**
+  `"[CONVEX M(auth:register)] [Request ID: …] Server Error\n  Called by client"` —— **没有错误码**。
+  实测（websocket，即浏览器真实路径）：
+
+  | | `auth:login`（故意错密码）收到的 message |
+  | --- | --- |
+  | dev | `…Uncaught Error: INVALID_CREDENTIALS\n at handler (../convex/auth.ts:82:13)` |
+  | prod | `…Server Error\n  Called by client` |
+
+  于是 `describeError` 的 `ERROR_MESSAGES` 映射在 prod 上**一个都匹配不到**，用户会看到那句原始字符串。
+  已在 `describeError` 里加了兜底：剥掉 `[CONVEX …]` / `[Request ID: …]` 外壳，若只剩 `Server Error`
+  就显示「操作失败，请重试」，并对未登记的错误码 `console.warn`。
+
+  **正确的修法**（尚未做）：把 `convex/` 里 127 处 `throw new Error("CODE")` 换成 `throw new ConvexError("CODE")`，
+  并让 `describeError` 优先读 `err.data`。只有 `ConvexError` 的载荷在 production deployment 上会透传给客户端。
+  这是产品环境可用性的前提，不是可选优化。
+- `convex/progress.ts` 的 `effortStats` 与 `listTasks` 的 **returns 校验器**里 `labelId` 仍是 `v.optional` —— 这是对的
+  （历史数据可能无类别），不要跟着 args 一起收紧。
 
 **前端**
 
@@ -406,20 +484,68 @@ snapshots/               数据快照（已 gitignore）
 
 ---
 
-## 12. 维护约定 —— 改完代码必须同步本文件
+## 12. 【强制】数据表结构变更流程
+
+**任何对数据表结构（`convex/schema.ts`：加/删表、加/删字段、改字段类型、加/删索引、改枚举）的改动，
+都必须按下面四步、按这个顺序执行。** 这条规则优先于「先快速改一下」的冲动。
+
+### 步骤
+
+**1. 先备份 dev 和 prod —— 两个都要**
+
+```bash
+bash scripts/backup-deployments.sh          # 加 --files 可连附件一起备份
+```
+
+产物：`backups/<时间戳>/{dev,prod}.zip`。脚本会校验归档非空，空归档（例如指错了 deployment）直接 exit 1，
+避免出现"以为备份过了"。
+
+**2. 改 schema，并推送到两个 deployment**
+
+```bash
+npx convex dev --once     # dev
+npx convex deploy         # prod（需要伪终端确认，见 §9）
+```
+
+纯新增字段/表/索引不需要数据迁移，Convex 自动处理；索引会在推送后后台构建。
+
+**3. 导入现有数据 —— 仅当变更需要重建表或改写数据时**
+
+```bash
+npx convex import --replace backups/<时间戳>/dev.zip
+npx convex import --prod --replace backups/<时间戳>/prod.zip
+```
+
+⚠️ `--replace` 是**整表覆盖**，会丢掉「导出之后」写入的数据 —— 先确认没有新写入，否则再备份一次。
+**纯新增的字段/表不要执行这一步。**
+
+**4. 验证两个环境**
+
+- dev：`npx convex function-spec` 确认 args/returns 校验器符合预期；dev 的报错信息完整，可直接看错误码。
+- prod：只能靠**成功返回**判断（`auth:me` 返回 `{"status":"success","value":null}`）。
+  **prod 的错误信息被脱敏**（见 §11），拿错误文案做判据会误判成"函数不存在"。
+
+### 为什么两个都要备份
+
+dev 与 prod 是**两个独立数据库**（见 §9），schema 要分别推送。只备份一个，另一个一旦导错就无从恢复。
+`backups/` 内含 `sessions` 表的明文 bearer token，**必须保持 gitignore**（本仓库是 public）。
+
+---
+
+## 13. 维护约定 —— 改完代码必须同步本文件
 
 **每次改动后，按下表检查并更新对应章节，然后再交付。** 不要留下过期的 AGENTS.md。
 
 | 若你改了… | 必须更新 |
 | --- | --- |
-| `convex/schema.ts`（加表/加字段/加索引/改枚举） | §4 表格、§5 相关规则 |
+| **`convex/schema.ts`（数据表结构）** | 先按 **§12 强制流程**备份 dev + prod，再推送；并更新 §4 表格、§5 相关规则 |
 | 任何 Convex 函数的增删改名、入参或返回结构 | §7 API 一览；若是新错误码 → §5 + `src/lib/ui.ts` 的 `ERROR_MESSAGES` |
 | 业务规则/不变量（状态派生、迭代冻结、工时语义…） | §5（这是最需要精确的一节） |
 | 权限守卫或成员/管理员语义 | §6 |
-| 前端视图、组件增删、状态机 | §8 |
+| 前端视图、组件增删、状态机、后端切换机制 | §8 |
 | 样式 token、断点、class 命名约定 | §8「样式约定」 |
-| npm scripts、依赖、构建/部署方式、`.env` 变量 | §2、§9 |
-| `scripts/` 增删或破坏性变化、快照格式 | §10 |
+| npm scripts、依赖、构建/部署方式、`.env` 变量、deployment | §2、§9 |
+| `scripts/` 增删或破坏性变化、备份/快照格式 | §10、§12 |
 | 修掉或新发现的技术债 | §11（修掉的删掉，新发现的补上） |
 
 **给未来 Agent 的硬性要求：**

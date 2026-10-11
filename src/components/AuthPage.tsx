@@ -3,11 +3,17 @@ import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { writeToken } from "../session";
 import { describeError } from "../lib/ui";
+import { BACKENDS, ENV_KEYS, type EnvKey } from "../backend";
 
 export default function AuthPage({
   onAuthenticated,
+  env,
+  onChangeEnv,
 }: {
   onAuthenticated: (token: string) => void;
+  /** Which Convex deployment to sign in to. */
+  env: EnvKey;
+  onChangeEnv: (env: EnvKey) => void;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -150,6 +156,30 @@ export default function AuthPage({
             {mode === "login" ? "立即注册" : "去登录"}
           </button>
         </div>
+
+        {/* Which database you are signing in to. The two backends are entirely
+            separate — including their accounts — so this sits on the sign-in
+            screen rather than somewhere you could only reach once logged in. */}
+        <div className="env-bar">
+          <label htmlFor="env" className="muted">
+            后端数据
+          </label>
+          <select
+            id="env"
+            className="input env-select"
+            value={env}
+            onChange={(e) => onChangeEnv(e.target.value as EnvKey)}
+          >
+            {ENV_KEYS.map((key) => (
+              <option key={key} value={key}>
+                {BACKENDS[key].label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="faint env-hint">
+          当前连接 <span className="mono">{BACKENDS[env].host}</span> · 两个环境的数据与账号互相独立，切换后需重新登录
+        </p>
       </div>
     </div>
   );
