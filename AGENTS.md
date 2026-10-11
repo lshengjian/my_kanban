@@ -56,8 +56,10 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
 - Convex CLI 版本 1.46.0，位于 `node_modules/.bin/convex`；`node_modules` 中**没有 wrangler**，部署在仓库外工具链完成。
 - **无 `convex.json`、无 `convex/auth.config.ts`、无 `.env`**；只有 `.env.local`（已 gitignore，6 行）：
   `CONVEX_DEPLOYMENT`、`VITE_CONVEX_URL`、`VITE_CONVEX_SITE_URL`。当前 deployment 为 `dev:fine-ibis-920`。
-- Git 现状：仅 1 个提交（`08f75c2 Initial commit`），`git ls-files` **只跟踪 `LICENSE`**，其余全部 untracked。
-  不要假设任何文件已在版本控制中；提交前先确认 `.gitignore`。
+- Git：远端 `origin` = `git@github.com:lshengjian/my_kanban.git`，分支 `main`，全部源码已跟踪并推送。
+  历史：`08f75c2 Initial commit`（仅 LICENSE）→ `4eed5fa`（首个完整源码提交）。
+  **⚠️ 该仓库是 public 的** —— 提交前务必确认没有把密钥、`.env.local`、`.import-tmp.json`、`snapshots/` 带进去
+  （这些都在 `.gitignore` 里，但新增文件时要自己核对）。
 
 ---
 
@@ -366,13 +368,18 @@ snapshots/               数据快照（已 gitignore）
 - `scripts/reset-data.sh` 的表清单**已漂移**：仍含遗留表 `items`、`labelTemplates`，
   却**不含** goals / tasks / goalTasks / attachments → 它并不会清空当前 schema 的目标项与任务项。
   （snapshot 排除 burndown，purge 包含 burndown，三份清单互不一致。）
-- `.gitignore` 覆盖 `.env.local` `node_modules` `dist` `snapshots` `.import-tmp.json` `.wrangler`；
-  但 `.aud.mjs` 与 `wrangler.toml` **未被跟踪也未被忽略**。
+- `.gitignore` 覆盖 `.env.local` `node_modules` `dist` `snapshots` `.import-tmp.json` `.wrangler`。
+  `.aud.mjs` 与 `wrangler.toml` 既未被忽略、现已被跟踪（注意 `.aud.mjs` 是开发辅助脚本，会随源码公开）。
 
 **前端**
 
 - **没有任何拖拽实现**（`src/` 内无 `onDrag*` / `draggable` / pointer 事件），排序与流转全靠按钮。
   但 `styles.css:617` `.column.drag-over` 与 `:751` `.drop-line` 是**死 CSS**（疑似早期拖拽版残留）。
+- `styles.css:1472` 有一段**没有选择器的孤立声明块**（`display:flex` / `align-items` / `gap:12px` /
+  `margin-top:20px` / `padding:12px 16px` 共 6 条声明），浏览器会静默丢弃这整块，
+  `vite build` 也会打出 `css-syntax-error` 警告（不阻断构建）。
+  位于「2024 refresh」追加层，疑似编辑时把选择器行误删；仓库无历史提交可对照，
+  **无法确定原选择器，故未擅自补上** —— 修它需要先确认这些声明原本属于哪个元素。
 - `ProjectPage.submitBoard` **不传 `description`**（服务端 `createBoard` 也无此参数）→ 新建迭代弹窗里的「描述」被静默丢弃。
 - `AttachmentSection` 把 `getAttachmentUrl` 这个 query 用 `useQuery(api.x, "skip")` + 强制类型转换当**一次性命令式函数**调用 —— 非常规但刻意。
 - 多处 mutation 缺 try/catch → 未处理的 rejection：`BoardPage` 的排序按钮、移出迭代、检查项 toggle/remove。
