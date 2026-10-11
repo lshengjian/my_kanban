@@ -163,6 +163,11 @@ snapshots/               数据快照（已 gitignore）
 - **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；它的状态列完全由任务派生。
 - **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
 - 一个任务可以服务多个目标项（`goalTasks` 多对多）。
+- **卡片不填描述**：目标项与任务项都只以名称表达，UI 里**没有任何描述输入框**
+  （任务项在 schema 里本来就没有 `description` 字段）。
+  `goals.description` 这个列**仍保留在 schema 里**，`createGoal` 会写入 `""`、
+  `updateGoal` 也仍接受它 —— 属于**已弃用但未删除**的字段，为的是不做破坏性迁移、
+  也不丢历史数据。真正的删除需要改 `convex/schema.ts` 并跑迁移，得按 §12 的流程来。
 - **新建卡片只要名称，类别后置**：新增目标项只有一个名称输入框；新增任务项只收名称 / 负责人 /
   预计完成日期 / 关联目标项。类别在**详情面板**里设置 —— 目标项在 `GoalDrawer`，任务项在 `TaskEditor`，
   两边都**可选**（下拉里有「未分类」）。服务端 `createGoal` / `createTask` 的 `labelId` 因此是可选参数。
@@ -352,6 +357,9 @@ snapshots/               数据快照（已 gitignore）
   | --- | --- | --- | --- |
   | 目标项 | `ProductList` 的单行输入框（**只在「待处理」列渲染**） | `GoalDrawer`（抽屉，选中即存） | `data.goalLabels` |
   | 任务项 | `NewTaskModal`（名称/负责人/期限/关联目标项） | `TaskEditor`（「未分类」可清空） | `data.labels` |
+
+  `GoalDrawer` 的字段是：标题 / 类别 / 客户价值估计 / 任务进展 / 检查列表 / 附件 —— **没有描述**
+  （见 §5 的「卡片不填描述」）。
 - `ProjectPage.tsx`：看板列表（栏目名 **项目看板**）、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
@@ -499,7 +507,12 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   `vite build` 也会打出 `css-syntax-error` 警告（不阻断构建）。
   位于「2024 refresh」追加层，疑似编辑时把选择器行误删；仓库无历史提交可对照，
   **无法确定原选择器，故未擅自补上** —— 修它需要先确认这些声明原本属于哪个元素。
-- `ProjectPage.submitBoard` **不传 `description`**（服务端 `createBoard` 也无此参数）→ 新建迭代弹窗里的「描述」被静默丢弃。
+- **`goals.description` 是已弃用但未删除的字段**：UI 已完全不收集、不显示描述（见 §5）。
+  它仍在 schema 与 `createGoal` / `updateGoal` 的入参里，`createGoal` 固定写 `""`。
+  要真正删列需按 §12 走（备份 dev + prod → 改 schema → 迁移清掉已有文档上的该字段 → 推送）。
+- `ProjectPage.submitBoard` **不传 `description`**（服务端 `createBoard` 也无此参数）→ 新建迭代弹窗里的
+  「描述（可选）」输入框**是死的**，用户填了会被静默丢弃。属于与上面同类的"描述残留"，
+  要么补上 `createBoard` 的 description 参数，要么把这个输入框删掉。
 - `AttachmentSection` 把 `getAttachmentUrl` 这个 query 用 `useQuery(api.x, "skip")` + 强制类型转换当**一次性命令式函数**调用 —— 非常规但刻意。
 - 多处 mutation 缺 try/catch → 未处理的 rejection：`BoardPage` 的排序按钮、移出迭代、检查项 toggle/remove。
 - `GoalDrawer.save` 比对的是原始 `goal` prop 而非 `live`；`live` 只用于进度条。

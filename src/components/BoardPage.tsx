@@ -1167,7 +1167,6 @@ function GoalDrawer({
 }) {
   const update = useMutation(api.goals.updateGoal);
   const [title, setTitle] = useState(goal.title);
-  const [description, setDescription] = useState(goal.description);
   const [value, setValue] = useState(goal.value?.toString() ?? "");
   // `goalLabels`, not `labels`: a goal is always categorised from the 预期成果看板's
   // vocabulary, and this drawer is reachable from an 迭代 board too.
@@ -1179,10 +1178,10 @@ function GoalDrawer({
 
   // Saved on blur: the drawer is a live view, so there is no save button.
   const save = async () => {
-    if (title.trim() === goal.title && description === goal.description) return;
+    if (title.trim() === goal.title) return;
     setError(null);
     try {
-      await update({ token, goalId: goal._id, title, description });
+      await update({ token, goalId: goal._id, title });
     } catch (err) {
       setError(describeError(err));
     }
@@ -1270,16 +1269,6 @@ function GoalDrawer({
           <span className="faint" style={{ fontSize: 11.5 }}>
             PO 评定的相对价值，也是发布燃尽图的纵轴单位
           </span>
-        </div>
-        <div className="field">
-          <label htmlFor="gdesc">描述</label>
-          <textarea
-            id="gdesc"
-            className="textarea"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onBlur={save}
-          />
         </div>
         {error && <div className="error-text">{error}</div>}
 
