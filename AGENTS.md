@@ -1,0 +1,413 @@
+# AGENTS.md — My KanBan（敏捷项目管理看板）
+
+> **本文件是项目的唯一事实来源（single source of truth）。**
+> 开始任何任务前先读本文件，不要重新逐文件通读源码。
+> **每次改动代码后，必须回来同步本文件对应章节**（见文末「维护约定」）。
+
+---
+
+## 1. 项目是什么
+
+面向中文团队的**敏捷项目管理看板** Web 应用（个人/小团队自建，非 SaaS 多租户）。
+围绕一套 Scrum 术语建模：项目 → 预期成果看板（产品列表 PBL）→ 目标项 → 迭代（Sprint）→ 任务项，
+外加检查列表、附件、卡片类型（标签）、活动日志、燃尽图、用户与权限管理。
+
+- 前端 SPA：React 18 + TypeScript + Vite 6
+- 后端：Convex 1.46（TypeScript 云函数 + 文档数据库 + 文件存储）
+- 部署：Cloudflare Pages（`wrangler.toml`，`name = "kb-app"`，产物目录 `dist/`）
+- 用户界面与所有文案：**简体中文**。代码注释、标识符：英文。
+- 品牌名不统一（已知问题）：`src/App.tsx` 显示 **My KanBan**，`AuthPage.tsx` 与 `dist/index.html` 标题为 **FlowBoard**，根 `index.html` 标题为「敏捷项目管理看板」。
+
+### 术语表（代码 ↔ 中文 ↔ 英文）
+
+| 中文 | 代码 | 说明 |
+| --- | --- | --- |
+| 预期成果看板 | `boards.kind === "backlog"` | 产品列表 / PBL。每项目**恰好一个** |
+| 迭代列表 | `boards.kind === "sprint"` | 一个 Sprint，可多个 |
+| 目标项 | `goals` | 团队共同承诺。**无负责人、无截止日期** |
+| 任务项 | `tasks` | 可执行单元，**有负责人、有截止日期、记录工时** |
+| 待处理 / 处理中 / 已完成 | goal 列名（固定三列） | 由任务状态**派生**，不可拖拽修改 |
+| 提议 / 执行中 / 已完成 | `tasks.status` = `proposed`/`in_progress`/`done` | 迭代看板三条固定泳道 |
+| 卡片类型 / 标签 | `labels` | 同一张表两种 scope：`system` 预设 / `project` 项目自有 |
+| 客户价值估计 | `goals.value` (1–10) | 发布燃尽图纵轴 |
+| 预计工时 / 耗费工时 | `tasks.estimatedHours` / `tasks.actualHours` | 分别在「开始执行」/「标记完成」时录入 |
+| 检查列表 | `checklistItems` | 目标项的验收条件，**与任务项独立** |
+| 附件 | `attachments` | 图片内联显示，文档下载 |
+
+---
+
+## 2. 常用命令
+
+```bash
+npm run dev        # Vite 开发服务器 → http://127.0.0.1:5173
+npm run typecheck  # tsc --noEmit（唯一的静态校验手段）
+npm run build      # tsc --noEmit && vite build → dist/
+npm run preview    # 预览 dist/
+
+npx convex dev     # 必需：跑 Convex 后端（无对应 npm script）
+npx convex data <table> --format jsonArray   # 读表
+npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
+```
+
+- **没有任何测试框架、没有 lint、没有 CI**（`.github` 不存在，`package.json` 无 test 脚本，仓库内无 `*.test.*`）。
+  → 「验证」= `npm run typecheck` 通过 + 人工/脚本冒烟。**改动后端业务规则时务必手动验证或补最小验证手段**。
+- `tsconfig.json` 是 `strict` + `noUnusedLocals` + `noUnusedParameters`，且 `include` 同时覆盖 `src` 与 `convex`
+  （`convex/_generated` 被 exclude）。因此前后端同一次 typecheck。
+- Convex CLI 版本 1.46.0，位于 `node_modules/.bin/convex`；`node_modules` 中**没有 wrangler**，部署在仓库外工具链完成。
+- **无 `convex.json`、无 `convex/auth.config.ts`、无 `.env`**；只有 `.env.local`（已 gitignore，6 行）：
+  `CONVEX_DEPLOYMENT`、`VITE_CONVEX_URL`、`VITE_CONVEX_SITE_URL`。当前 deployment 为 `dev:fine-ibis-920`。
+- Git 现状：仅 1 个提交（`08f75c2 Initial commit`），`git ls-files` **只跟踪 `LICENSE`**，其余全部 untracked。
+  不要假设任何文件已在版本控制中；提交前先确认 `.gitignore`。
+
+---
+
+## 3. 目录结构
+
+```
+convex/                  后端（Convex 函数 + 数据模型）
+  schema.ts              全部 15 张表定义与索引 —— 改数据结构先改这里
+  auth.ts                注册/登录/登出/me + 管理员用户管理
+  projects.ts            项目、成员、加入申请、邀请、邀请码
+  boards.ts              看板查询与创建（含列/泳道组装、默认标签播种）
+  goals.ts               目标项 + 任务项 + 排入迭代 + 状态派生（业务核心）
+  labels.ts              看板级卡片类型 CRUD
+  templates.ts           系统级预设 CRUD（仅管理员）
+  attachments.ts         检查列表 + 附件（含上传 URL）
+  progress.ts            项目进度 + 两种燃尽图查询
+  lib/                   纯函数与服务端共享逻辑（无 React、无客户端依赖）
+    auth.ts              鉴权守卫（见 §6）
+    constants.ts         术语表/颜色/枚举/deriveSprintStatus —— 前后端共用
+    password.ts          纯 TS 实现的 PBKDF2-HMAC-SHA256 + randomToken
+    burndown.ts          燃尽图读写（基线、序列、upsert）
+    activity.ts          logActivity + ActivityType（13 种）
+    labelPresets.ts      normalizeColor + seedDefaultLabels
+    board.ts             columnsOfBoard
+  _generated/            Convex 生成物，不要手改；schema 变更后由 convex dev 重新生成
+src/
+  main.tsx               ErrorBoundary → ConvexProvider → App
+  App.tsx                视图状态机（无路由库）+ 顶栏/底栏
+  session.ts             localStorage 里的 token（key: "flowboard.token"）
+  styles.css             全部样式（1895 行，见 §8）
+  components/
+    BoardPage.tsx        1554 行 —— 项目内最主要交互（产品列表 + 迭代视图）
+    ProjectPage.tsx      808 行 —— 单项目：看板列表、成员、进度、燃尽图
+    ProjectsPage.tsx     493 行 —— 项目列表、创建、邀请码加入
+    ui.tsx               共享 UI 原语（Modal/Drawer/Toast/ConfirmButton…）
+    types.ts             客户端手写的 Convex 返回类型（保留 Id<> 品牌）
+    lib/ui.ts → src/lib/ui.ts   ERROR_MESSAGES + describeError + 格式化
+    AuthPage / AccountPage / AdminPage / PresetPage
+    LabelManager / TemplateEditor / ColorPicker / BurndownChart / ErrorBoundary
+scripts/                 运维脚本（多数具破坏性，见 §10）
+snapshots/               数据快照（已 gitignore）
+```
+
+---
+
+## 4. 数据模型（15 张表）
+
+完整定义见 `convex/schema.ts`。索引是查询性能的关键，**新增查询前先确认有可用索引**。
+
+| 表 | 作用 | 主要索引 |
+| --- | --- | --- |
+| `users` | 账号。`role: admin\|member`，`status: active\|suspended` | `by_email`, `by_role` |
+| `sessions` | 自建会话票据，TTL **30 天** | `by_token`, `by_user` |
+| `projects` | 项目。`key` = 6 位邀请码，`sprintLengthDays`（默认 14） | `by_owner`, `by_key` |
+| `projectMembers` | 成员关系。`role: owner\|member` —— **写权限的唯一依据** | `by_project`, `by_user`, `by_project_user` |
+| `joinRequests` | 申请加入 / 邮件邀请，统一为一条记录 | `by_project_status`, `by_user_status`, `by_project_user` |
+| `boards` | 看板。`kind: backlog\|sprint`，sprint 带日期/编号/goal | `by_project`, `by_project_kind` |
+| `labels` | 卡片类型。`scope: system\|project` | `by_board`, `by_board_position`, `by_scope_kind(_position)` |
+| `columns` | **仅**产品列表的三列，`isDone` 标记终态 | `by_board`, `by_board_position` |
+| `goals` | 目标项。`labelId` 引用、`sprintId?`（有值 ⇒ 处理中）、`value?` 1–10 | `by_board_column`, `by_board`, `by_column`, `by_project`, `by_label`, `by_sprint` |
+| `tasks` | 任务项。`status`、`startDate?`、`estimatedHours?`、`actualCompletedAt?`、`actualHours?` | `by_board`, `by_project`, `by_assignee`, `by_label` |
+| `goalTasks` | 目标项 ↔ 任务项 **多对多** | `by_goal`, `by_task`, `by_project` |
+| `checklistItems` | 检查项（目标项验收条件） | `by_goal`（含 position）, `by_project` |
+| `attachments` | 附件元数据 + `storageId` | `by_goal`（含 createdAt）, `by_project` |
+| `activityLog` | 状态改变日志，13 种 `type` | `by_board`, `by_project`（含 createdAt）, `by_goal` |
+| `burndown` | 燃尽图快照，`scope: sprint\|release`，一行一 (scope, board, key) | `by_project_scope`, `by_scope_board` |
+
+注意：`sprintStatus` 字段虽存在于 `boards`，但读取一律走 `deriveSprintStatus()`（由日期推导），不要依赖存储值。
+
+---
+
+## 5. 业务规则与不变量（改动前必读）
+
+### 目标项 vs 任务项（最核心的划分）
+
+- **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；它的状态列完全由任务派生。
+- **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
+- 一个任务可以服务多个目标项（`goalTasks` 多对多）。
+
+### 目标项状态派生（`goals.ts: syncGoalStatus` / `isGoalComplete`）
+
+```
+已完成  ⇐ 至少 1 个任务 且 全部任务 done
+处理中  ⇐ 未全部完成，但 sprintId 有值（已排入迭代）
+待处理  ⇐ 未排入迭代
+```
+
+- **空任务集不算完成**（否则新建目标项会立刻"已完成"）。这是刻意的，不要"修复"。
+- 状态列只在服务端派生写入，客户端**不允许**把目标项拖到别的列。
+- 任何影响任务的改动后都会重算目标项状态并刷新燃尽图。
+
+### 任务状态流转（`goals.ts: setTaskStatus`）
+
+| 目标状态 | 服务端行为 |
+| --- | --- |
+| → `in_progress` | 打 `startDate`（若空）、写入 `estimatedHours`、清空 `actualCompletedAt`/`actualHours` |
+| → `done` | 打 `startDate`（若空）、打 `actualCompletedAt = now`、写入 `actualHours` |
+| → `proposed` | **清空全部四个字段**（重新开始计时，数字保持诚实） |
+
+- 客户端强制**逐级推进**：不能 `proposed → done` 一步到位；`done` 可「撤回」。
+- 进入 `in_progress` 时客户端弹窗强制要求预计工时，进入 `done` 时强制要求耗费工时（>0）。
+- 返回 `{ goalsCompleted }`，供 UI 提示。
+
+### 迭代（Sprint）
+
+- 每个项目**恰好一个**未归档 backlog（重复创建 → `BACKLOG_ALREADY_EXISTS`）；`createProject` 会自动建 backlog 及三列。
+- 产品列表三列固定为 待处理 / 处理中 / 已完成；迭代看板**没有自己的列**，三条泳道由 `tasks.status` 派生。
+- `sprintStatus` 由日期推导：开始日当天仍为 未开始，次日起 进行中，结束日之后 已结束。
+- 默认周期 14 天（`DEFAULT_SPRINT_DAYS`）；`projects.sprintLengthDays` 校验 1–90，**只影响之后新建的迭代**。
+- `endDate` 可省略，服务端按 `startDate + sprintLengthDays * DAY_MS` 补全；`endDate <= startDate` → `INVALID_SPRINT_RANGE`。
+- **排入迭代（`planGoalToSprint`）只允许 未开始 的迭代** —— 迭代一旦开始，范围冻结（`SPRINT_NOT_PLANNED`）。
+- **移出迭代**（`sprintId: undefined`）会连带删除该目标项的任务：任务属于迭代，会变孤儿；
+  但**检查项与附件跟随目标项，保留不动**。
+- 迭代名称留空时服务端自动命名为 `迭代 N`（N = 现有最大编号 + 1）。
+
+### 卡片类型 / 标签（`labels.ts`, `templates.ts`, `lib/labelPresets.ts`）
+
+- 一张表两种 scope：`system`（管理员维护的预设，无 boardId）/ `project`（某看板的自有词汇）。
+- **卡片只存 `labelId` 引用**，名称与颜色只存一份。删除标签时若有卡片引用 → `LABEL_IN_USE`；最后一个 → `CANNOT_DELETE_LAST_LABEL`。
+- 新建看板时**复制**词汇表：优先复制同项目其它看板的标签，只有项目第一个看板才回退到系统预设。
+  → 管理员改预设**不会**改写已有卡片。
+- `normalizeColor` 只接受 `#rgb` / `#rrggbb`，其它一律回退 `#64748b`（客户端 `ColorPicker` 复用同一函数）。
+
+### 进度与燃尽图（`progress.ts`, `lib/burndown.ts`）
+
+- 项目进度**只按目标项计数**（不是任务项）。`percent = round(completed / total * 100)`，分母为 0 时为 0。
+- 燃尽图表一表两用，靠 `scope` 区分：
+  - `sprint`：x = 迭代内日期（`"YYYY-MM-DD"`），y = **剩余工时**（未完成任务的 `estimatedHours` 之和）。
+    注意：预计工时在「开始执行」时才录入，所以**没人认领的任务暂时不计入**。
+  - `release`：x = 迭代 id，y = **剩余客户价值估计**（`completedAt === undefined` 的 goals 的 `value` 之和）。
+    未估值的项目贡献 0。
+- `baseline` = 迭代开始时的工时 / 立项时的点数；`ideal` 为直线。
+- 写入是**按 key upsert**：重开一个目标项会改写当天读数而不是追加一行。
+- `scripts/project-snapshot.mjs` **刻意不备份 `burndown`**（派生数据）。
+
+### 检查项与附件
+
+- 检查项（`checklistItems`）是**目标项的验收条件**，与任务表完全独立；可带可选的负责人与检查日期；文本上限 300。
+- 附件上限 **20 MB**；`isImage` 由**服务端**按 content type 判定（png/jpeg/gif/webp/svg+xml/avif），客户端无法伪装。
+- 图片返回内联可渲染 URL；文档走 `getAttachmentUrl` 取一次性签名 URL 后下载。
+- `ctx.storage.delete` 是 best-effort（存储非事务），失败只留下孤儿 blob，不报错。
+
+### 其他约束速查
+
+- 标题上限 160（目标项/任务项）、看板名与项目名上限 80、标签名 24、预设名 24、检查项文本 300。
+- 密码最小长度 `MIN_PASSWORD_LENGTH`（前端提示「至少 6 位」）；注册邮箱走正则校验并 `trim()+toLowerCase()` 归一化。
+- 登录失败**不区分**「用户不存在」与「密码错误」，统一 `INVALID_CREDENTIALS`（防账号枚举）。
+- **第一个注册的账号自动成为管理员**（`isFirstUser`）。`scripts/reset-data.sh` 清空 users 表就是为了这个引导流程。
+- 管理员不能停用自己（`CANNOT_SUSPEND_SELF`）；系统必须保留 ≥1 名管理员（`LAST_ADMIN`）。
+- **停用账号会立即删除其全部会话**（`setUserStatus`）。
+- 项目分页 `pageWindow` 把 limit 夹到 [1, 50]、offset ≥ 0。
+
+---
+
+## 6. 权限模型（`convex/lib/auth.ts`）
+
+**鉴权是自建的，不是 Convex Auth、不用 `ctx.auth`。** 每个 Convex 函数都收一个
+`token: v.optional(v.string())` 参数，服务端查 `sessions.by_token` 并把 `expiresAt <= now` 视为无效。
+
+| 守卫 | 语义 | 失败错误码 |
+| --- | --- | --- |
+| `getUserByToken` | 解析票据，无效/过期返回 null | — |
+| `requireUser` | 必须是有效且未停用的账号 | `UNAUTHENTICATED` / `SUSPENDED` |
+| `requireAdmin` | 全局管理员 | `FORBIDDEN` |
+| `requireProjectMember` | **写权限的唯一依据**：必须是项目成员 | `PROJECT_NOT_FOUND` / `NOT_A_PROJECT_MEMBER` |
+| `requireBoardMember` | 由看板反查项目并要求成员 | `BOARD_NOT_FOUND` |
+| `requireProjectOwnerOf` | 项目 owner 专属：建看板、加目标项 | `PROJECT_OWNER_ONLY` |
+| `requireLabelEditor` | 系统预设要 admin；项目标签要 owner | `FORBIDDEN` / `PROJECT_OWNER_ONLY` |
+| `requireColumnOfBoard` | 列必须属于该看板 | `COLUMN_NOT_FOUND` |
+
+**关键设计（易踩坑）：全局管理员在项目内是「只读访客」。**
+管理员可以查看任何项目，但**写操作以项目成员身份为准**，所以管理员不会悄悄改别人的看板。
+反之，`requireProjectOwnerOf` 才是"只有项目经理能做的事"。
+
+**已知不一致（UI 比服务端更严，改动时注意）：**
+`getProject` 把 `pendingRequests` 返回给**所有成员**，`decideJoinRequest` / `inviteUser` / `updateProject`
+服务端也只要求「是成员」，而 UI 只对 owner 显示这些入口。服务端并未强制 owner。
+
+---
+
+## 7. 后端 API 一览
+
+按模块列出全部导出（`returns` 校验器已写全，改返回值要同步改校验器与 `src/components/types.ts`）。
+
+- **auth.ts**：`register` `login` `logout` `me` `listUsers` `setUserRole` `setUserStatus` `adminStats` `isAdmin`
+- **projects.ts**：`createProject` `listMyProjects` `listAllProjects` `myInvitations` `getProject` `discoverProjects`
+  `requestToJoin` `inviteUser` `requestToJoinByKey` `decideJoinRequest` `respondToInvitation`
+  `listMyJoinRequests` `removeMember` `updateProject` `deleteProject`
+- **boards.ts**：`listBoards` `getBoard` `createBoard` `updateBoard`（另导出内部 `createBoardRecord`）
+- **goals.ts**：`createGoal` `updateGoal` `deleteGoal` `reorderGoal` `planGoalToSprint`
+  `effortStats` `listTasks` `createTask` `setTaskStatus` `updateTask` `deleteTask`
+  （导出内部复用：`tasksOfGoal` `isGoalComplete` `syncGoalStatus` `customerValue` `tasksOfSprint` `goalIdsOfTask`）
+- **labels.ts**：`listLabels` `createLabel` `updateLabel` `deleteLabel` `moveLabel`
+- **templates.ts**：`listTemplates` `createTemplate` `updateTemplate` `deleteTemplate`
+- **attachments.ts**：`listChecks` `addCheck` `toggleCheck` `updateCheck` `deleteCheck`
+  `generateUploadUrl` `createAttachment` `listAttachments` `getAttachmentUrl` `deleteAttachment`
+- **progress.ts**：`getProjectProgress` `getSprintBurndown` `getReleaseBurndown` `snapshotBurndown`（另 re-export `columnsOfBoard`）
+
+`convex/lib/` 下的模块**必须保持前后端无关**（`constants.ts` 被前端直接 import），不要引入服务端专属依赖。
+`password.ts` 是纯 TS 的 PBKDF2-HMAC-SHA256：因为 Convex 的 V8 isolate 不保证有 `crypto.subtle`，
+且 `"use node"` 模块不能被同时导出 query/mutation 的文件 import —— 这是刻意的实现，不要换成原生 crypto。
+
+---
+
+## 8. 前端结构与设计系统
+
+### 视图路由
+
+**没有路由库。** `src/App.tsx` 用 `view` 联合类型状态机切换：
+
+```ts
+{ kind: "projects" } | { kind: "project"; id } | { kind: "board"; id; projectId }
+| { kind: "admin" } | { kind: "presets" } | { kind: "account" }
+```
+
+- 顶栏（桌面）与底部 `.tabbar`（≤760px）是同一组目的地；管理员多出「卡片类型」「用户管理」。
+- 会话失效（`me === null`）会清 token 并退回登录页；`booting` 期间显示「加载中…」。
+- `BoardPage` 需要 `isProjectOwner`，由 `App` 从 `listMyProjects` 首页推导（超出首页范围时降级为只读）。
+
+### 入口与错误边界
+
+`src/main.tsx`：`React.StrictMode` → `ErrorBoundary` → `ConvexProvider` → `App`。
+**ErrorBoundary 包在 Provider 外层**（故意的），这样任何 query 抛出都不会白屏。
+`new ConvexReactClient(import.meta.env.VITE_CONVEX_URL)`；该值在 `vite build` 时被**内联进 bundle**，
+所以部署产物的后端地址是编译期固定的（改后端必须重新构建）。
+
+### 组件分工
+
+- `BoardPage.tsx`（1554 行，最复杂）：`ProductList`、`PlanModal`、`IterationView`、`TaskCard`、`TaskEditor`、
+  `TimeModal`、`NewTaskModal`、`EffortStats`、`SprintHeader`、`BoardTabs`、`GoalDrawer`、
+  `CheckListSection`、`AttachmentSection`。唯一数据源是 `api.boards.getBoard`。
+- `ProjectPage.tsx`：看板列表、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
+  UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
+- `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
+- `AdminPage.tsx` 用户管理；`PresetPage.tsx` + `TemplateEditor.tsx` 管理员维护系统预设；
+  `LabelManager.tsx` 看板内卡片类型管理（`canManage` 由 owner 决定，非 owner 见「仅项目经理可修改」）。
+
+### 共享 UI 原语（`src/components/ui.tsx`）—— 必须复用，不要自己造
+
+`Avatar` `Badge` `ProgressBar` `Modal` `Drawer` `ConfirmButton` `useToast` `useAsync` `EmptyState`
+（`ConfirmButton` 是两步确认 + 3 秒自动解除；`useToast` 2.6 秒自动消失。）
+
+### 错误处理约定（硬性）
+
+1. **绝不把后端错误原文渲染给用户。** 一律 `describeError(err)`（`src/lib/ui.ts`）。
+2. **新增后端错误码必须登记**到 `src/lib/ui.ts` 的 `ERROR_MESSAGES`（约 50 条，码 → 中文）。
+   `describeError` 用包含匹配（Convex 会在错误上附请求信息与堆栈），匹配不到则去掉 `Uncaught Error:` 取首行，兜底「操作失败」。
+3. 每个 mutation 都要 try/catch 并 toast；**当前有若干处遗漏**（见 §11）。
+
+### 样式约定（`src/styles.css`，1895 行）
+
+- 单一 `:root`（L1–30）定义全部 token：`--bg` `--surface` `--border(-strong)` `--text/-dim/-faint`
+  `--accent(-soft/-text)` `--danger/--success/--warning` + `-soft`、`--shadow-*`、`--radius-*`。
+- 深色模式：**只有一个** `@media (prefers-color-scheme: dark)` 块重声明同名变量；无 `data-theme`、无 JS 切换。
+  **新增 token 必须同时写进两个 `:root` 块。**
+- 移动优先：断点 760px（主）+ 720px + 420px + `prefers-reduced-motion`。**没有 min-width 桌面优先查询。**
+- 结构是**追加式**：前 ~1370 行是基础表，之后是按注释分段叠加的覆盖层（2024 refresh / Mobile /
+  Device-adaptive navigation / iPhone 16 fixes / burndown）。
+  → **新规则追加到文件末尾并写注释段**，不要回头改前面的规则。
+- 颜色只能来自 token 或 `color-mix(...)`；仅 JS 侧调色板（`LABEL_PALETTE`、`AVATAR_COLORS`）是硬编码 hex。
+- `.tabbar` 在 760px 以上隐藏，以下是固定底栏，**故意 `z-index: 50`**（低于 `.overlay` 的 60）。
+
+### 服务端常量的单一来源
+
+词表/枚举/颜色来自 `convex/lib/constants.ts`（`BOARD_KINDS` `BOARD_KIND_META` `GOAL_COLUMNS`
+`GOAL_COLUMN_META` `TASK_STATUSES` `TASK_LANES` `TASK_STATUS_META` `SPRINT_STATUS_META` `DEFAULT_LABELS`
+`LABEL_PALETTE` `DAY_MS` `DEFAULT_SPRINT_DAYS` `deriveSprintStatus`）与 `lib/labelPresets.ts`（`normalizeColor`）。
+**前端直接 import 这些**，不要在客户端复制一份 —— 这样客户端校验与服务端完全一致。
+
+---
+
+## 9. 部署
+
+- `wrangler.toml`：`name = "kb-app"`，`compatibility_date = "2024-11-01"`，`pages_build_output_dir = "dist"`。
+  无 `[env]` / routes / vars。
+- SPA 回退规则**不在 wrangler.toml**，而在 `public/_redirects`：`/*  /index.html  200`，Vite 会原样拷进 `dist/`。
+- 流程：`npm run build` → 用 Cloudflare Pages（或 wrangler，需另行安装）上传 `dist/`。
+- 后端 Convex 部署独立于前端；本地用 `npx convex dev`（deployment 由 `.env.local` 的 `CONVEX_DEPLOYMENT` 决定）。
+- `dist/` 当前是 2026-10-10 的旧构建（`assets/index-DlC-_vft.js` + `index-DAzC3r12.css`），**不要当源码用**。
+
+---
+
+## 10. 脚本与运维（`scripts/`）—— 破坏性操作务必先备份
+
+| 脚本 | 用途 | 破坏性 | 用法 |
+| --- | --- | --- | --- |
+| `project-snapshot.mjs` | 备份/恢复示例项目（`复刻雷电游戏`） | backup 只读；**restore 用 `--replace` 整表覆盖** | `node scripts/project-snapshot.mjs backup [--project X]` / `... restore` |
+| `purge-except.mjs` | 只保留指定项目及其成员用户 | ⛔ **破坏性**，文件头声明 2026-10-10 起禁止对生产库使用 | `ALLOW_PURGE=1 node scripts/purge-except.mjs [项目名]`（未设 `ALLOW_PURGE=1` 直接 exit 1） |
+| `reset-data.sh` | 清空 13 张表（含遗留表 `items`/`labelTemplates`，清单已过期，见 §11）为了「首位注册用户即 admin」引导 | ⛔ **破坏性，无任何确认闸门** | `bash scripts/reset-data.sh` |
+| `migrate-label-id.mjs` | 一次性：`labelTemplates` → `labels` 双 scope，`labelName` → `labelId` | ⛔ `--replace`；**必须在 schema 切换前跑，且已执行过，勿重跑** | `node scripts/migrate-label-id.mjs` |
+| `migrate-customer-value.mjs` | 一次性：`goals.storyPoints` → `goals.value` | 非破坏性（逐行调 `updateGoal`，不做 `--replace`）；**已执行过** | `CONVEX_URL=<url> node scripts/migrate-customer-value.mjs <token>` |
+| `.aud.mjs`（仓库根，未被 gitignore 覆盖） | Playwright 巡检辅助：底栏遮挡、横向溢出、左右越界、点击区 <32px | 只读 | `import { run } from "./.aud.mjs"`，`await run(page, label)` |
+
+**备份格式**：`snapshots/<项目名>-YYYY-MM-DDTHH-MM-SS.json`（24 份 + `latest.json` 指针），
+顶层 `savedAt` / `project` / `userIds` / `tables`（14 张表，**不含 burndown**）。
+
+---
+
+## 11. 已知问题与技术债（改动相关代码时留意，勿盲目"顺手修"）
+
+**数据/安全**
+
+- ⚠️ **`.import-tmp.json` 含明文 session token**（7 行会话记录，键含 `token`）。它已被 gitignore，但**建议尽早删除**。
+- `snapshots/latest.json` 里存的是**绝对路径** `/Users/alex/workspace/kanban/snapshots/...`，
+  与当前 checkout `/Users/alex/git_root/my_kanban` **不一致** → 直接 restore 会失败或读到另一份副本。
+- `scripts/reset-data.sh` 的表清单**已漂移**：仍含遗留表 `items`、`labelTemplates`，
+  却**不含** goals / tasks / goalTasks / attachments → 它并不会清空当前 schema 的目标项与任务项。
+  （snapshot 排除 burndown，purge 包含 burndown，三份清单互不一致。）
+- `.gitignore` 覆盖 `.env.local` `node_modules` `dist` `snapshots` `.import-tmp.json` `.wrangler`；
+  但 `.aud.mjs` 与 `wrangler.toml` **未被跟踪也未被忽略**。
+
+**前端**
+
+- **没有任何拖拽实现**（`src/` 内无 `onDrag*` / `draggable` / pointer 事件），排序与流转全靠按钮。
+  但 `styles.css:617` `.column.drag-over` 与 `:751` `.drop-line` 是**死 CSS**（疑似早期拖拽版残留）。
+- `ProjectPage.submitBoard` **不传 `description`**（服务端 `createBoard` 也无此参数）→ 新建迭代弹窗里的「描述」被静默丢弃。
+- `AttachmentSection` 把 `getAttachmentUrl` 这个 query 用 `useQuery(api.x, "skip")` + 强制类型转换当**一次性命令式函数**调用 —— 非常规但刻意。
+- 多处 mutation 缺 try/catch → 未处理的 rejection：`BoardPage` 的排序按钮、移出迭代、检查项 toggle/remove。
+- `GoalDrawer.save` 比对的是原始 `goal` prop 而非 `live`；`live` 只用于进度条。
+- `overdue` 在渲染时用 `Date.now()` 计算 → 页面常开不会自动翻转。
+- `SprintHeader` 内 `board.kind === "sprint" ? … : "skip"` 恒真（该组件只在 sprint 下渲染）。
+- `BoardPage` 早退 `if (!data) return "加载中…"` → 加载与错误不区分。
+- `TaskCard` 有两段重复 JSDoc，第一段已过时；`hours()` 与 `hrs()` 是重复实现。
+- 直接展示了错误码字符串 `"INVALID_CUSTOMER_VALUE"` 而非走 `describeError`。
+- `ProjectsPage` 的 `listMyJoinRequests` 未加 `"skip"` 守卫（其余 query 都有）。
+- `listAllProjects` 返回的 `role` 是按 `ownerId` 推的，不代表调用者的真实成员关系。
+- `types.ts` 与 `ProjectPage` 注释里"剩余故事点"是旧叫法，实际纵轴是「剩余客户价值估计」。
+
+---
+
+## 12. 维护约定 —— 改完代码必须同步本文件
+
+**每次改动后，按下表检查并更新对应章节，然后再交付。** 不要留下过期的 AGENTS.md。
+
+| 若你改了… | 必须更新 |
+| --- | --- |
+| `convex/schema.ts`（加表/加字段/加索引/改枚举） | §4 表格、§5 相关规则 |
+| 任何 Convex 函数的增删改名、入参或返回结构 | §7 API 一览；若是新错误码 → §5 + `src/lib/ui.ts` 的 `ERROR_MESSAGES` |
+| 业务规则/不变量（状态派生、迭代冻结、工时语义…） | §5（这是最需要精确的一节） |
+| 权限守卫或成员/管理员语义 | §6 |
+| 前端视图、组件增删、状态机 | §8 |
+| 样式 token、断点、class 命名约定 | §8「样式约定」 |
+| npm scripts、依赖、构建/部署方式、`.env` 变量 | §2、§9 |
+| `scripts/` 增删或破坏性变化、快照格式 | §10 |
+| 修掉或新发现的技术债 | §11（修掉的删掉，新发现的补上） |
+
+**给未来 Agent 的硬性要求：**
+
+1. 动手前先读本文件；只有本文件没覆盖的细节才去读源码。
+2. 不要"顺手"重构成与本文件描述不符的形态；若确实要改约定，同时改本文件。
+3. 改后端行为后**必须至少跑 `npm run typecheck`**（本项目没有测试，这是唯一的自动化防线）。
+4. 任何 `--replace` / reset / purge 类命令前先 `project-snapshot.mjs backup`，并明确当前 deployment 不是生产库。
+5. 交付时明确说明：改了哪些文件、跑了什么验证、本文件哪几节同步更新了。

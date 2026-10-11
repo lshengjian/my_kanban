@@ -1,0 +1,139 @@
+/** Small shared helpers for formatting and the category/priority palette. */
+
+import {
+  BOARD_KIND_META,
+  SPRINT_STATUS_META,
+} from "../../convex/lib/constants";
+import type { BoardKind } from "../../convex/lib/constants";
+
+export { BOARD_KIND_META, SPRINT_STATUS_META };
+export type { BoardKind };
+
+const AVATAR_COLORS = [
+  "#6366f1",
+  "#ec4899",
+  "#14b8a6",
+  "#f59e0b",
+  "#8b5cf6",
+  "#06b6d4",
+  "#ef4444",
+  "#22c55e",
+];
+
+export function avatarColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
+}
+
+export function initials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  // CJK names have no spaces: the first character is the most useful signal.
+  return /[一-龥]/.test(trimmed)
+    ? trimmed.slice(0, 1)
+    : trimmed
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0])
+        .join("");
+}
+
+export function sprintStatusMeta(
+  status: "planned" | "active" | "closed" | undefined,
+) {
+  return SPRINT_STATUS_META[status ?? "planned"];
+}
+
+/** Days remaining in a sprint; negative once it has overrun. */
+export function sprintDaysLeft(
+  endDate: number | undefined,
+): number | null {
+  if (!endDate) return null;
+  return Math.ceil((endDate - Date.now()) / 86_400_000);
+}
+
+export function formatTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  return new Date(ts).toLocaleDateString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+export function formatDate(ts: number): string {
+  return new Date(ts).toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+/** Human label for a backend error code, falling back to the raw text. */
+const ERROR_MESSAGES: Record<string, string> = {
+  INVALID_EMAIL: "邮箱格式不正确",
+  INVALID_NAME: "名称不能为空或过长",
+  EMAIL_TAKEN: "该邮箱已被注册",
+  PASSWORD_TOO_SHORT: "密码至少 6 位",
+  INVALID_CREDENTIALS: "邮箱或密码不正确",
+  ACCOUNT_SUSPENDED: "该账户已被停用，请联系管理员",
+  UNAUTHENTICATED: "登录已失效，请重新登录",
+  SUSPENDED: "该账户已被停用",
+  FORBIDDEN: "没有权限执行此操作",
+  PROJECT_NOT_FOUND: "项目不存在",
+  BOARD_NOT_FOUND: "看板不存在",
+  COLUMN_NOT_FOUND: "看板列不存在",
+  ITEM_NOT_FOUND: "目标项不存在",
+  NOT_A_PROJECT_MEMBER: "你不是该项目成员",
+  OWNER_ONLY: "只有项目拥有者可以执行此操作",
+  ALREADY_A_MEMBER: "已经是项目成员",
+  REQUEST_ALREADY_PENDING: "已提交过申请，等待审批",
+  REQUEST_NOT_FOUND: "申请不存在",
+  REQUEST_ALREADY_DECIDED: "该申请已处理",
+  USER_NOT_FOUND: "用户不存在（请确认对方已注册）",
+  ASSIGNEE_NOT_A_MEMBER: "负责人必须是项目成员",
+  INVALID_CUSTOMER_VALUE: "客户价值估计请填 1 到 10 的整数",
+  INVALID_TITLE: "标题不能为空或过长",
+  INVALID_TEXT: "内容不能为空或过长",
+  BACKLOG_ALREADY_EXISTS: "该项目已有预期成果看板（一个项目只有一个）",
+  BACKLOG_NOT_DRAGGABLE: "预期成果看板不可拖动，请用「排入迭代」改变状态",
+  NOT_A_BACKLOG: "该操作仅适用于预期成果看板",
+  SPRINT_NOT_FOUND: "Sprint 不存在",
+  SPRINT_IN_OTHER_PROJECT: "不能把需求排入其它项目的 Sprint",
+  NOT_A_SPRINT: "该操作仅适用于敏捷项目管理看板",
+  INVALID_SPRINT_RANGE: "结束日期必须晚于开始日期",
+  SPRINT_NOT_PLANNED: "只能排入尚未开始的迭代；已开始或已结束的迭代不能再加入目标项",
+  SPRINT_CLOSED: "该 Sprint 已结束，无法再排入",
+  CHECK_ASSIGNEE_REQUIRED: "Sprint 的检查项必须指定检查人",
+  CHECK_DATE_REQUIRED: "Sprint 的检查项必须设定检查时间",
+  ASSIGNEE_REQUIRED: "排入 Sprint 前，请先为该需求指定负责人和截止日期",
+  DUE_DATE_REQUIRED: "排入 Sprint 前，请先为该需求设定截止日期",
+  PROJECT_OWNER_ONLY: "只有项目经理可以修改看板标签",
+  LABEL_NOT_ON_BOARD: "标签不属于当前看板",
+  LABEL_NOT_FOUND: "标签不存在",
+  LABEL_IN_USE: "该类型下还有卡片在用，请先改掉它们的分类，或直接修改这个类型的名称和颜色",
+  LABEL_ALREADY_EXISTS: "同名标签已存在",
+  CANNOT_DELETE_LAST_LABEL: "至少要保留一个标签",
+  INVALID_LABEL_NAME: "标签名称不能为空或过长",
+  COLUMN_NOT_EMPTY: "该列仍有目标项，请先移走",
+  CANNOT_DELETE_LAST_COLUMN: "至少要保留一列",
+  CANNOT_REMOVE_OWNER: "不能移除项目拥有者",
+  CANNOT_SUSPEND_SELF: "不能停用自己的账户",
+  LAST_ADMIN: "系统至少需要保留一名管理员",
+  ITEM_CREATE_FAILED: "创建失败，请重试",
+};
+
+export function describeError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  // Convex prefixes the code with request info and appends a server stack, so
+  // match on containment rather than equality.
+  const hit = Object.entries(ERROR_MESSAGES).find(([code]) => raw.includes(code));
+  if (hit) return hit[1];
+  return raw.replace(/^.*Uncaught Error:\s*/, "").split("\n")[0]!.trim() || "操作失败";
+}

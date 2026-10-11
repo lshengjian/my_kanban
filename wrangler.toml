@@ -1,0 +1,6 @@
+name = "kb-app"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+# The app is a single-page React app: every unknown path must serve
+# index.html so client-side state restores on a hard refresh.
