@@ -28,6 +28,29 @@ const formatDateInput = (ts: number) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
+/**
+ * A card's 类别, drawn as a small square of the category colour in front of the
+ * card's name. The name itself is not printed — it lives in the hover title and
+ * in the detail sheet — so the board stays scannable by colour.
+ */
+function LabelSquare({ label }: { label?: { name: string; color: string } }) {
+  if (!label) return null;
+  return (
+    <span
+      className="label-square"
+      style={{ background: label.color }}
+      title={label.name}
+      role="img"
+      aria-label={`类别：${label.name}`}
+    />
+  );
+}
+
+/** Resolves a card's `labelId` against the board's category vocabulary. */
+function findLabel(labels: BoardData["labels"], id?: Id<"labels">) {
+  return labels.find((l) => l._id === id);
+}
+
 /* ------------------------------------------------------------------ *
  * 预期成果看板 — 目标项 in three columns, ordered by the 产品经理
  * ------------------------------------------------------------------ */
@@ -52,6 +75,9 @@ function ProductList({
     token ? { token, projectId: data.board.projectId } : "skip",
   );
   const [draft, setDraft] = useState<Record<string, string>>({});
+  // The 类别 picked for the next quick-added 目标项. Shared across columns on
+  // purpose: pick it once and keep adding, which is how the list gets filled.
+  const [draftLabel, setDraftLabel] = useState<string>("");
   const [planning, setPlanning] = useState<Goal | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,10 +88,22 @@ function ProductList({
   const add = async (columnId: Id<"columns">) => {
     const title = (draft[columnId] ?? "").trim();
     if (!title) return;
+    // 类别 is required, so refuse early with a reason instead of letting the
+    // server reject the call.
+    if (!draftLabel) {
+      setError("请先选择类别");
+      return;
+    }
     setDraft((d) => ({ ...d, [columnId]: "" }));
     try {
       setError(null);
-      await createGoal({ token, boardId: data.board._id, columnId, title });
+      await createGoal({
+        token,
+        boardId: data.board._id,
+        columnId,
+        title,
+        labelId: draftLabel as Id<"labels">,
+      });
     } catch (err) {
       setError(describeError(err));
     }
@@ -90,7 +128,10 @@ function ProductList({
               {column.goals.map((goal, index) => (
                 <article className="card" key={goal._id}>
                   <div className="card-main" onClick={() => onOpenGoal(goal)}>
-                    <div className="card-title">{goal.title}</div>
+                    <div className="card-title">
+                      <LabelSquare label={findLabel(data.labels, goal.labelId)} />
+                      {goal.title}
+                    </div>
                     <div className="card-meta">
                       {goal.taskTotal > 0 && (
                         <span className="badge">
@@ -146,6 +187,23 @@ function ProductList({
 
               {!column.isDone && canAddGoals && (
                 <div className="quick-add">
+                  <select
+                    className="input"
+                    aria-label="新目标项的类别"
+                    title="新目标项的类别"
+                    value={draftLabel}
+                    onChange={(e) => {
+                      setDraftLabel(e.target.value);
+                      setError(null);
+                    }}
+                  >
+                    <option value="">选择类别 *</option>
+                    {data.labels.map((l) => (
+                      <option key={l._id} value={l._id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     className="input"
                     placeholder="＋ 新增目标项"
@@ -418,14 +476,7 @@ function TaskCard({
         }}
         aria-label={`查看并修改「${task.title}」`}
       >
-        {label && (
-          <span
-            className="badge label-chip"
-            style={{ background: `${label.color}22`, color: label.color }}
-          >
-            {label.name}
-          </span>
-        )}
+        <LabelSquare label={label} />
         <span className="card-title">{task.title}</span>
         {overdue && (
           <span className="badge late" title="已超过预计完成日期">
@@ -725,6 +776,10 @@ function NewTaskModal({
       setError("每个任务项至少要关联一个目标项");
       return;
     }
+    if (!labelId) {
+      setError("请选择类别");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -735,7 +790,7 @@ function NewTaskModal({
         assigneeId: assignee as Id<"users">,
         dueDate: new Date(due).getTime(),
         goalIds: [...selected] as Id<"goals">[],
-        labelId: labelId ? (labelId as Id<"labels">) : undefined,
+        labelId: labelId as Id<"labels">,
       });
       onClose();
     } catch (err) {
@@ -789,20 +844,23 @@ function NewTaskModal({
           />
         </div>
         <div className="field">
-          <label htmlFor="tlabel">类别</label>
+          <label htmlFor="tlabel">类别 *</label>
           <select
             id="tlabel"
             className="input"
             value={labelId}
             onChange={(e) => setLabelId(e.target.value)}
           >
-            <option value="">未分类</option>
+            <option value="">选择类别 *</option>
             {data.labels.map((l) => (
               <option key={l._id} value={l._id}>
                 {l.name}
               </option>
             ))}
           </select>
+          {data.labels.length === 0 && (
+            <p className="hint">该看板还没有类别，请先到「卡片类型」新增一个。</p>
+          )}
         </div>
         <div className="field">
           <label>关联目标项 *（可多选）</label>
@@ -831,7 +889,7 @@ function NewTaskModal({
           <button
             className="btn btn-primary"
             onClick={submit}
-            disabled={busy || !title.trim() || !due}
+            disabled={busy || !title.trim() || !due || !labelId}
           >
             {busy ? "创建中…" : "创建"}
           </button>

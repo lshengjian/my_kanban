@@ -1357,13 +1357,6 @@ a {
   text-align: center;
 }
 
-/* A category chip tinted with the label's own colour. */
-.badge.label-chip {
-  background: transparent;
-  border: 1px solid currentColor;
-  font-weight: 600;
-}
-
 @keyframes sheet-up {
   from { transform: translateY(16px); opacity: 0.4; }
   to { transform: translateY(0); opacity: 1; }
@@ -1752,7 +1745,6 @@ label { font-size: 0.875rem; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card.slim .label-chip { flex: none; }
 .badge.late {
   flex: none;
   background: var(--danger-soft, #fee2e2);
@@ -1893,3 +1885,31 @@ label { font-size: 0.875rem; }
   border: 1px solid var(--border);
   border-radius: 12px;
 }
+
+/* ---- Card categories: a colour square before the name ----------------
+   Every new card must carry a 类别, and the card shows it as a small solid
+   square instead of printing the category name — the board reads by colour.
+   The name stays available in the square's hover title, in the detail
+   sheet, and in the 卡片类型 manager. */
+.label-square {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  vertical-align: middle;
+  /* Keeps the square legible on a dark surface without shifting layout. */
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+}
+/* The goal card's title is a block div, so the square needs a little air
+   before the text it annotates. */
+.card-title .label-square { margin-right: 6px; }
+
+/* The 产品经理 now picks a 类别 before typing, so the quick-add is a
+   two-control stack rather than a single input. */
+.quick-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.quick-add select { font-size: 12.5px; }

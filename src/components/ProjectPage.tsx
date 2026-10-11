@@ -304,7 +304,7 @@ export default function ProjectPage({
       )}
 
       {/* Product backlog + sprints */}
-      <div className="section-title">敏捷项目管理看板</div>
+      <div className="section-title">项目看板</div>
       {boards === undefined ? (
         <div className="skeleton" style={{ height: 120 }} />
       ) : (

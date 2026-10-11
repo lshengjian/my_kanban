@@ -89,7 +89,7 @@ src/
   main.tsx               ErrorBoundary → ConvexProvider → App
   App.tsx                视图状态机（无路由库）+ 顶栏/底栏
   session.ts             localStorage 里的 token（key: "flowboard.token"）
-  styles.css             全部样式（1895 行，见 §8）
+  styles.css             全部样式（约 1915 行，见 §8）
   components/
     BoardPage.tsx        1554 行 —— 项目内最主要交互（产品列表 + 迭代视图）
     ProjectPage.tsx      808 行 —— 单项目：看板列表、成员、进度、燃尽图
@@ -138,6 +138,11 @@ snapshots/               数据快照（已 gitignore）
 - **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；它的状态列完全由任务派生。
 - **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
 - 一个任务可以服务多个目标项（`goalTasks` 多对多）。
+- **类别（`labelId`）在「新建」时必填**：目标项用产品列表每列顶部的类别下拉框（`.quick-add`，一次选定后跨列粘住），
+  任务项用「新增任务项」弹窗。服务端 `createGoal` / `createTask` 的 validator 已把 `labelId` 收紧为必填。
+  编辑时仍允许清空（`updateGoal` / `updateTask` 接受 `null`）—— 约束只加在创建上。
+- 卡片上的类别**只以颜色小方框呈现**（`LabelSquare` / `.label-square`），**不再显示类别名文字**；
+  类别名通过方块的 `title` 提示与详情面板可见。
 
 ### 目标项状态派生（`goals.ts: syncGoalStatus` / `isGoalComplete`）
 
@@ -291,7 +296,9 @@ snapshots/               数据快照（已 gitignore）
 - `BoardPage.tsx`（1554 行，最复杂）：`ProductList`、`PlanModal`、`IterationView`、`TaskCard`、`TaskEditor`、
   `TimeModal`、`NewTaskModal`、`EffortStats`、`SprintHeader`、`BoardTabs`、`GoalDrawer`、
   `CheckListSection`、`AttachmentSection`。唯一数据源是 `api.boards.getBoard`。
-- `ProjectPage.tsx`：看板列表、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
+  文件顶部有 `LabelSquare`（类别颜色小方框）与 `findLabel`（按 `labelId` 解析类别）两个共享小工具，
+  卡片显示类别一律走它们。
+- `ProjectPage.tsx`：看板列表（栏目名 **项目看板**）、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
 - `AdminPage.tsx` 用户管理；`PresetPage.tsx` + `TemplateEditor.tsx` 管理员维护系统预设；
@@ -309,7 +316,7 @@ snapshots/               数据快照（已 gitignore）
    `describeError` 用包含匹配（Convex 会在错误上附请求信息与堆栈），匹配不到则去掉 `Uncaught Error:` 取首行，兜底「操作失败」。
 3. 每个 mutation 都要 try/catch 并 toast；**当前有若干处遗漏**（见 §11）。
 
-### 样式约定（`src/styles.css`，1895 行）
+### 样式约定（`src/styles.css`，约 1915 行）
 
 - 单一 `:root`（L1–30）定义全部 token：`--bg` `--surface` `--border(-strong)` `--text/-dim/-faint`
   `--accent(-soft/-text)` `--danger/--success/--warning` + `-soft`、`--shadow-*`、`--radius-*`。
@@ -317,7 +324,7 @@ snapshots/               数据快照（已 gitignore）
   **新增 token 必须同时写进两个 `:root` 块。**
 - 移动优先：断点 760px（主）+ 720px + 420px + `prefers-reduced-motion`。**没有 min-width 桌面优先查询。**
 - 结构是**追加式**：前 ~1370 行是基础表，之后是按注释分段叠加的覆盖层（2024 refresh / Mobile /
-  Device-adaptive navigation / iPhone 16 fixes / burndown）。
+  Device-adaptive navigation / iPhone 16 fixes / burndown / **Card categories**）。
   → **新规则追加到文件末尾并写注释段**，不要回头改前面的规则。
 - 颜色只能来自 token 或 `color-mix(...)`；仅 JS 侧调色板（`LABEL_PALETTE`、`AVATAR_COLORS`）是硬编码 hex。
 - `.tabbar` 在 760px 以上隐藏，以下是固定底栏，**故意 `z-index: 50`**（低于 `.overlay` 的 60）。
@@ -337,8 +344,12 @@ snapshots/               数据快照（已 gitignore）
   无 `[env]` / routes / vars。
 - SPA 回退规则**不在 wrangler.toml**，而在 `public/_redirects`：`/*  /index.html  200`，Vite 会原样拷进 `dist/`。
 - 流程：`npm run build` → 用 Cloudflare Pages（或 wrangler，需另行安装）上传 `dist/`。
-- 后端 Convex 部署独立于前端；本地用 `npx convex dev`（deployment 由 `.env.local` 的 `CONVEX_DEPLOYMENT` 决定）。
-- `dist/` 当前是 2026-10-10 的旧构建（`assets/index-DlC-_vft.js` + `index-DAzC3r12.css`），**不要当源码用**。
+- **前端与后端是两个独立部署**：`convex/` 下的函数改动不会随 `pages.dev` 生效，
+  必须推送到 Convex deployment（本地 `npx convex dev` 会持续推送，生产用 `npx convex deploy`）。
+  只改前端时，若 `convex/*` 的 args 校验器被收紧（例如 `labelId` 由可选变必填），
+  旧后端仍按旧校验器运行 —— 前端必须只发送旧后端也认识的字段，否则会 validation error。
+  `npx convex function-spec` 可以**只读**查看线上 deployment 真实生效的 args/returns 校验器。
+- `dist/` 是本地构建产物（已 gitignore，文件名哈希随构建变化），**不要当源码用、也不要提交**。
 
 ---
 
@@ -375,7 +386,7 @@ snapshots/               数据快照（已 gitignore）
 
 - **没有任何拖拽实现**（`src/` 内无 `onDrag*` / `draggable` / pointer 事件），排序与流转全靠按钮。
   但 `styles.css:617` `.column.drag-over` 与 `:751` `.drop-line` 是**死 CSS**（疑似早期拖拽版残留）。
-- `styles.css:1472` 有一段**没有选择器的孤立声明块**（`display:flex` / `align-items` / `gap:12px` /
+- `styles.css:1462` 有一段**没有选择器的孤立声明块**（`display:flex` / `align-items` / `gap:12px` /
   `margin-top:20px` / `padding:12px 16px` 共 6 条声明），浏览器会静默丢弃这整块，
   `vite build` 也会打出 `css-syntax-error` 警告（不阻断构建）。
   位于「2024 refresh」追加层，疑似编辑时把选择器行误删；仓库无历史提交可对照，

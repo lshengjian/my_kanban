@@ -120,7 +120,9 @@ export const createGoal = mutation({
     columnId: v.optional(v.id("columns")),
     title: v.string(),
     description: v.optional(v.string()),
-    labelId: v.optional(v.id("labels")),
+    // 类别 is mandatory at creation: every new card is categorised, so the
+    // board can be scanned by colour. Editing may still clear it.
+    labelId: v.id("labels"),
     position: v.optional(v.number()),
     /** 客户价值估计 — 1~10 的相对价值刻度，发布燃尽图的纵轴单位。 */
     value: v.optional(v.number()),
@@ -577,7 +579,8 @@ export const createTask = mutation({
     assigneeId: v.id("users"),
     dueDate: v.number(),
     goalIds: v.array(v.id("goals")),
-    labelId: v.optional(v.id("labels")),
+    /** 类别 is mandatory at creation — see the note on `createGoal`. */
+    labelId: v.id("labels"),
   },
   returns: v.id("tasks"),
   handler: async (ctx, args) => {
