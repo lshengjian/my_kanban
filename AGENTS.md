@@ -111,6 +111,9 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
 根目录
   AGENTS.md              本文件 —— 面向 Agent 的唯一事实来源
   README.md              面向使用者的说明：功能、安装、部署、环境切换
+  docs/
+    软件设计说明书.md      架构、接口契约、15 张表、各模块详细说明、不变量
+    维护手册.md           安装、部署、数据导出/导入、故障排查、运维红线
   .env.local.example     环境变量模板（可提交；.env.local 本身已 gitignore）
   wrangler.toml          Cloudflare Pages 配置（name=kb-app，输出 dist/）
   .aud.mjs               Playwright 巡检辅助（见 §10）
@@ -139,9 +142,9 @@ src/
   backend.ts             两个后端（prod/dev）的 URL、标签、localStorage 记忆、client 缓存
   App.tsx                视图状态机（无路由库）+ 顶栏/底栏
   session.ts             localStorage 里的 token（key: "flowboard.token"）
-  styles.css             全部样式（约 1915 行，见 §8）
+  styles.css             全部样式（约 1930 行，见 §8）
   components/
-    BoardPage.tsx        1554 行 —— 项目内最主要交互（产品列表 + 迭代视图）
+    BoardPage.tsx        1538 行 —— 项目内最主要交互（产品列表 + 迭代视图）
     ProjectPage.tsx      808 行 —— 单项目：看板列表、成员、进度、燃尽图
     ProjectsPage.tsx     493 行 —— 项目列表、创建、邀请码加入
     ui.tsx               共享 UI 原语（Modal/Drawer/Toast/ConfirmButton…）
@@ -287,7 +290,8 @@ snapshots/               数据快照（已 gitignore）
 
 ### 其他约束速查
 
-- 标题上限 160（目标项/任务项）、看板名与项目名上限 80、标签名 24、预设名 24、检查项文本 300。
+- 标题上限 160（目标项/任务项）、看板名与项目名上限 80、**看板自有标签名 20**（`labels.ts`）、
+  **系统级预设名 24**（`templates.ts`）、检查项文本 300。两者不同，别混。
 - 密码最小长度 `MIN_PASSWORD_LENGTH`（前端提示「至少 6 位」）；注册邮箱走正则校验并 `trim()+toLowerCase()` 归一化。
 - 登录失败**不区分**「用户不存在」与「密码错误」，统一 `INVALID_CREDENTIALS`（防账号枚举）。
 - **第一个注册的账号自动成为管理员**（`isFirstUser`）。`scripts/reset-data.sh` 清空 users 表就是为了这个引导流程。
@@ -421,7 +425,7 @@ snapshots/               数据快照（已 gitignore）
    `describeError` 用包含匹配（Convex 会在错误上附请求信息与堆栈），匹配不到则去掉 `Uncaught Error:` 取首行，兜底「操作失败」。
 3. 每个 mutation 都要 try/catch 并 toast；**当前有若干处遗漏**（见 §11）。
 
-### 样式约定（`src/styles.css`，约 1915 行）
+### 样式约定（`src/styles.css`，约 1930 行）
 
 - 单一 `:root`（L1–30）定义全部 token：`--bg` `--surface` `--border(-strong)` `--text/-dim/-faint`
   `--accent(-soft/-text)` `--danger/--success/--warning` + `-soft`、`--shadow-*`、`--radius-*`。
@@ -529,7 +533,7 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   已在 `describeError` 里加了兜底：剥掉 `[CONVEX …]` / `[Request ID: …]` 外壳，若只剩 `Server Error`
   就显示「操作失败，请重试」，并对未登记的错误码 `console.warn`。
 
-  **正确的修法**（尚未做）：把 `convex/` 里 127 处 `throw new Error("CODE")` 换成 `throw new ConvexError("CODE")`，
+  **正确的修法**（尚未做）：把 `convex/` 里 128 处 `throw new Error("CODE")` 换成 `throw new ConvexError("CODE")`，
   并让 `describeError` 优先读 `err.data`。只有 `ConvexError` 的载荷在 production deployment 上会透传给客户端。
   这是产品环境可用性的前提，不是可选优化。
 - `convex/progress.ts` 的 `effortStats` 与 `listTasks` 的 **returns 校验器**里 `labelId` 仍是 `v.optional` —— 这是对的
@@ -635,6 +639,8 @@ dev 与 prod 是**两个独立数据库**（见 §9），schema 要分别推送�
 | 样式 token、断点、class 命名约定 | §8「样式约定」 |
 | npm scripts、依赖、构建/部署方式、`.env` 变量、deployment | §2、§9 |
 | `scripts/` 增删或破坏性变化、备份/快照格式 | §10、§12 |
+| `docs/` 下的文档，或架构/接口/数据结构/不变量变化 | 同步 `docs/软件设计说明书.md` 的对应章节（架构 §3 / 表 §4 / 接口 §5 / 模块 §6 / 不变量 §7） |
+| 部署、导出导入、排障等操作方式变化 | 同步 `docs/维护手册.md`，并更新 §3 目录结构与 `README.md` 的文档索引 |
 | 修掉或新发现的技术债 | §11（修掉的删掉，新发现的补上） |
 
 **给未来 Agent 的硬性要求：**
