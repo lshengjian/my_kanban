@@ -19,12 +19,12 @@ export function normalizeColor(raw: string | undefined | null): string {
 /**
  * Seeds a newly created board's category vocabulary.
  *
- * A board inside an existing project inherits **that project's own** labels
- * first, so an 迭代's cards can be categorised the same way its product list
- * is. Only a project's first board falls back to the system presets — which
- * are written for software work and mean nothing to, say, a 迎评 project.
- * With no system presets configured at all, the built-in `DEFAULT_LABELS` are
- * used, so a board is never created with an empty 类别 list.
+ * A board inherits the vocabulary of a **same-kind** board in its project first,
+ * so every 迭代 in a project offers the same 任务项 categories. A project's first
+ * board of its kind falls back to the system presets for that kind — the presets
+ * are written per kind because 目标项 and 任务项 are categorised from different
+ * vocabularies. With no system presets configured at all, the built-in
+ * `DEFAULT_LABELS` are used, so a board is never created with an empty 类别 list.
  */
 export async function seedDefaultLabels(
   ctx: MutationCtx,
@@ -39,12 +39,18 @@ export async function seedDefaultLabels(
     .collect();
   if (siblings.length > 0) return; // already seeded
 
-  // Any other board in this project carries the vocabulary to copy.
+  // Only a sibling of the SAME kind carries a vocabulary worth copying: 目标项
+  // are categorised from the 预期成果看板, 任务项 from an 迭代, and those are two
+  // different vocabularies (the system presets are per-kind — see AGENTS.md §5).
+  // Matching *any* board here is what used to hand every 迭代 the product list's
+  // goal categories, so a task could only ever be filed under 目标项 wording.
   const projectBoards = await ctx.db
     .query("boards")
     .withIndex("by_project", (q) => q.eq("projectId", board.projectId))
     .collect();
-  const sourceBoardId = projectBoards.find((b) => b._id !== board._id)?._id;
+  const sourceBoardId = projectBoards.find(
+    (b) => b._id !== board._id && b.kind === board.kind,
+  )?._id;
 
   const fromProject = sourceBoardId !== undefined;
   const presets: { name: string; color: string; position: number }[] = fromProject

@@ -18,6 +18,8 @@
 - 后端：Convex 1.46（TypeScript 云函数 + 文档数据库 + 文件存储）
 - 部署：Cloudflare Pages（`wrangler.toml`，`name = "kb-app"`，产物目录 `dist/`）
 - 用户界面与所有文案：**简体中文**。代码注释、标识符：英文。
+  **界面文案里不允许出现英文「Sprint」** —— 一律写「迭代」（`SPRINT_*` 错误码常量、
+  `planGoalToSprint` / `getSprintBurndown` 之类的标识符不受此限）。
 - 品牌名：登录页与页面标题都用「**敏捷项目管理看板**」（`AuthPage.tsx`、`index.html`）。
   **唯一残留的不一致是应用内顶栏 `src/App.tsx` 仍写 "My KanBan"** —— 要统一就改那一处。
   `localStorage` 的 key（`flowboard.token` / `flowboard.env`）是内部标识，不要为了改名而动它。
@@ -69,12 +71,15 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
   | deployment | `lsj1788:kanban:kanban-dev` | `lsj1788:kanban:production` |
   | URL | `https://fine-ibis-920.convex.cloud` | `https://coordinated-camel-303.convex.cloud` |
   | 选它的命令 | 默认（`.env.local`） | 加 `--prod` |
-  | 数据 | **空库**（2026-10-12 清空） | **空库**（2026-10-12 清空） |
+  | 数据 | **已有真实数据**（见下） | **空库** |
 
-  **2026-10-12：两个 deployment 的 15 张表都已清空（全部为 0 行）**，项目尚未正式启用。
-  清空前的完整快照在 `backups/2026-10-12T07-39-20/{dev,prod}.zip`（dev 23 KB / prod 12 KB），
+  **prod 仍是空库**（2026-10-12 清空后未再写入）。**dev 已开始正式使用**：只有项目「示范项目」
+  （属于 `lsj178@139.com`）一个项目 —— 它的预期成果看板类别是 `约束 / 功能 / 性能`，
+  迭代「迭代 1」的类别是 `文档 / 测试 / 程序 / 美术 / 策划`。
+  → **dev 不再是可以随便清的测试库**，动手前先 `backup-deployments.sh`。
+  清空前的完整快照在 `backups/2026-10-12T07-39-20/{dev,prod}.zip`，
   需要时可用 `npx convex import [--prod] --replace <zip>` 恢复。
-  注意空库的两个后果：
+  注意空库（prod）的两个后果：
   1. **没有账号** → 第一个注册的人自动成为管理员（这是设计内的引导流程）。
   2. **没有系统级预设** → 新看板的类别由内置 `DEFAULT_LABELS` 兜底（见 §5）。
      「卡片类型」页此时显示"暂无预设，新建时将使用内置默认值"。
@@ -233,8 +238,12 @@ snapshots/               数据快照（已 gitignore）
 
 - 一张表两种 scope：`system`（管理员维护的预设，无 boardId）/ `project`（某看板的自有词汇）。
 - **卡片只存 `labelId` 引用**，名称与颜色只存一份。删除标签时若有卡片引用 → `LABEL_IN_USE`；最后一个 → `CANNOT_DELETE_LAST_LABEL`。
-- 新建看板时**复制**词汇表：优先复制同项目其它看板的标签，只有项目第一个看板才回退到系统预设。
-  → 管理员改预设**不会**改写已有卡片。
+- 新建看板时**复制同 kind 看板**的词汇表：只在同项目里找**同 kind** 的看板来继承
+  （第二个迭代继承第一个迭代），项目里该 kind 的第一个看板才回退到**该 kind 的**系统预设。
+  ⚠️ **绝不能跨 kind 复制** —— 目标项的词表属于预期成果看板，任务项的词表属于迭代，系统预设本身
+  就是按 kind 分的两套。跨 kind 复制正是"迭代看板里只有目标项那几个类别、任务项的类别怎么选都是
+  目标项的"这个 bug 的成因（`seedDefaultLabels` 曾用 `find(b => b._id !== board._id)` 匹配任意兄弟看板）。
+  → 管理员改预设**不会**改写已有卡片（预设只在建板时复制一次）。
 - **系统预设为空时必须回退到内置词表**：`seedDefaultLabels` 在「没有兄弟看板可复制 + 系统预设为空」
   （全新部署，或管理员把预设删光了）时，用 `constants.ts` 的 `DEFAULT_LABELS` 建出默认类别。
   没有这个回退，新看板会**一个类别都没有**，而新建迭代弹窗还在预览那些默认值 —— 说一套做一套。
@@ -441,7 +450,7 @@ snapshots/               数据快照（已 gitignore）
 | | dev | prod |
 | --- | --- | --- |
 | 推送命令 | `npx convex dev --once` | `npx convex deploy` |
-| 数据 | **空库**（2026-10-12 清空，见 §2） | **空库**（2026-10-12 清空，见 §2） |
+| 数据 | **已有真实数据**（见 §2） | **空库**（见 §2） |
 | 错误信息 | 完整（含错误码与堆栈） | **被脱敏**（见 §11） |
 
 - `npx convex deploy` **强制交互确认**，非交互终端会直接失败（`Cannot prompt for input`）。

@@ -155,7 +155,7 @@ export default function ProjectPage({
           </h1>
           <p>
             {project.description ? `${project.description} · ` : ""}
-            Sprint 周期 {project.sprintLengthDays ?? 14} 天
+            迭代周期 {project.sprintLengthDays ?? 14} 天
           </p>
         </div>
         <button className="btn" onClick={() => setShowInvite(true)}>
@@ -360,7 +360,7 @@ export default function ProjectPage({
                     {canManage && (
                       <button
                         className="btn btn-ghost btn-icon btn-sm"
-                        title="Sprint 设置"
+                        title="迭代设置"
                         onClick={(e) => {
                           e.stopPropagation();
                           setSettingsFor({
@@ -536,7 +536,7 @@ export default function ProjectPage({
                 />
               </div>
               <div className="field">
-                <label htmlFor="sgoal">Sprint 目标</label>
+                <label htmlFor="sgoal">迭代目标</label>
                 <input
                   id="sgoal"
                   className="input"
@@ -555,7 +555,7 @@ export default function ProjectPage({
                 value={boardDesc}
                 onChange={(e) => setBoardDesc(e.target.value)}
                 maxLength={400}
-                placeholder="本 Sprint 要达成什么？"
+                placeholder="本迭代要达成什么？"
               />
             </div>
             <div className="row" style={{ justifyContent: "flex-end" }}>
@@ -689,7 +689,7 @@ function ProjectSettingsDialog({
   return (
     <Modal
       title="项目设置"
-      subtitle="Sprint 周期会作为新建 Sprint 的默认时长。"
+      subtitle="迭代周期会作为新建迭代的默认时长。"
       onClose={onClose}
     >
       <div className="form-row">
@@ -714,7 +714,7 @@ function ProjectSettingsDialog({
           />
         </div>
         <div className="field">
-          <label htmlFor="pdays">Sprint 周期（天）</label>
+          <label htmlFor="pdays">迭代周期（天）</label>
           <input
             id="pdays"
             className="input"
@@ -726,7 +726,7 @@ function ProjectSettingsDialog({
             style={{ maxWidth: 140 }}
           />
           <div className="hint">
-            默认 14 天（2 周）。已有 Sprint 的起止日期不受影响，仅作用于之后新建的 Sprint。
+            默认 14 天（2 周）。已有迭代的起止日期不受影响，仅作用于之后新建的迭代。
           </div>
         </div>
         {error && <div className="error-text">{error}</div>}
