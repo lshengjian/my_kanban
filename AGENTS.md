@@ -3,8 +3,11 @@
 > **本文件是项目的唯一事实来源（single source of truth）。**
 > 开始任何任务前先读本文件，不要重新逐文件通读源码。
 > **每次改动代码后，必须回来同步本文件对应章节**（见 §13「维护约定」）。
-> ⚠️ **要改数据表结构（`convex/schema.ts`）？先读 §12 的强制流程** —— 必须先备份 dev + prod 两个
-> deployment，再推送，最后按需导入数据。
+> ⛔ **产品库（prod）的数据永远不可删除。** 任何"清空/重置/reset/purge 生产库"的操作都不许做，
+> 包括 `reset-data.sh --prod`、`convex import --prod --replace` 传空数据、删光表里的行。
+> 要清掉某些**具体记录**时，用业务代码/定向脚本按 id 删，不要整库清空。
+> ⚠️ **要改数据表结构（`convex/schema.ts`）？先读 §12 的强制流程** ——
+> **先把 dev + prod 的数据导出，改完 schema 再导入回去**（新增字段不需要导入，但导出照做）。
 
 ---
 
@@ -76,7 +79,16 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
   **prod 仍是空库**（2026-10-12 清空后未再写入）。**dev 已开始正式使用**：只有项目「示范项目」
   （属于 `lsj178@139.com`）一个项目 —— 它的预期成果看板类别是 `约束 / 功能 / 性能`，
   迭代「迭代 1」的类别是 `文档 / 测试 / 程序 / 美术 / 策划`。
-  → **dev 不再是可以随便清的测试库**，动手前先 `backup-deployments.sh`。
+  → **dev 也不再是可以随便清的测试库**，动手前先 `backup-deployments.sh`。
+
+  ### ⛔ 产品库数据不可删除（硬性约定，2026-10-12 起）
+
+  **prod 的数据只增不删。** 禁止任何形式的整库清空：
+  `reset-data.sh --prod`（脚本已加闸门，默认拒绝）、`import --prod --replace` 传空数据、
+  直接删表里的行。需要移除**具体记录**时，用业务 mutation 或定向脚本按 id 删。
+  `scripts/purge-except.mjs` 早已用 `ALLOW_PURGE=1` 闸门拒绝执行，照旧遵守。
+  **改表结构的正确顺序是「先导出 → 改 → 再导入」**，见 §12；不要用"清空重来"代替迁移。
+
   清空前的完整快照在 `backups/2026-10-12T07-39-20/{dev,prod}.zip`，
   需要时可用 `npx convex import [--prod] --replace <zip>` 恢复。
   注意空库（prod）的两个后果：
@@ -477,7 +489,7 @@ snapshots/               数据快照（已 gitignore）
 | `backup-deployments.sh` | **schema 变更前的强制备份**：dev + prod 全量导出 | 只读 | `bash scripts/backup-deployments.sh [--files]`（见 §12） |
 | `project-snapshot.mjs` | 备份/恢复示例项目（`复刻雷电游戏`） | backup 只读；**restore 用 `--replace` 整表覆盖** | `node scripts/project-snapshot.mjs backup [--project X]` / `... restore` |
 | `purge-except.mjs` | 只保留指定项目及其成员用户 | ⛔ **破坏性**，文件头声明 2026-10-10 起禁止对生产库使用 | `ALLOW_PURGE=1 node scripts/purge-except.mjs [项目名]`（未设 `ALLOW_PURGE=1` 直接 exit 1） |
-| `reset-data.sh` | 清空 **15 张表**，为了「首位注册用户即 admin」引导 | ⛔ **破坏性，无确认闸门 —— 先跑 `backup-deployments.sh`** | `bash scripts/reset-data.sh [--prod]` |
+| `reset-data.sh` | 清空 **15 张表**，为了「首位注册用户即 admin」引导 —— **只用于 dev** | ⛔ **破坏性**；`--prod` **默认被脚本拒绝**（需显式 `ALLOW_PROD_RESET=1`），生产库数据不许清 | `bash scripts/reset-data.sh`（dev）；`--prod` 仅限已备份并确认后 |
 | `migrate-label-id.mjs` | 一次性：`labelTemplates` → `labels` 双 scope，`labelName` → `labelId` | ⛔ `--replace`；**必须在 schema 切换前跑，且已执行过，勿重跑** | `node scripts/migrate-label-id.mjs` |
 | `migrate-customer-value.mjs` | 一次性：`goals.storyPoints` → `goals.value` | 非破坏性（逐行调 `updateGoal`，不做 `--replace`）；**已执行过** | `CONVEX_URL=<url> node scripts/migrate-customer-value.mjs <token>` |
 | `.aud.mjs`（仓库根，未被 gitignore 覆盖） | Playwright 巡检辅助：底栏遮挡、横向溢出、左右越界、点击区 <32px | 只读 | `import { run } from "./.aud.mjs"`，`await run(page, label)` |
@@ -560,6 +572,12 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
 **任何对数据表结构（`convex/schema.ts`：加/删表、加/删字段、改字段类型、加/删索引、改枚举）的改动，
 都必须按下面四步、按这个顺序执行。** 这条规则优先于「先快速改一下」的冲动。
 
+⛔ **两种绝对不许做的事**（2026-10-12 起）：
+1. **不许删除生产库（prod）的数据** —— 不清空、不重置、不用空数据 `--replace`、不删光表里的行。
+   需要移除**具体记录**就用业务 mutation 或定向脚本按 id 删。
+2. **不许用「清空重来」代替结构迁移** —— 改结构一律走**「先导出 → 改 → 再导入」**：导出是**无条件**
+   要做的第一步（哪怕只是加字段），导入则在该变更确实需要重建/改写数据时才做。
+
 ### 步骤
 
 **1. 先备份 dev 和 prod —— 两个都要**
@@ -609,7 +627,7 @@ dev 与 prod 是**两个独立数据库**（见 §9），schema 要分别推送�
 
 | 若你改了… | 必须更新 |
 | --- | --- |
-| **`convex/schema.ts`（数据表结构）** | 先按 **§12 强制流程**备份 dev + prod，再推送；并更新 §4 表格、§5 相关规则 |
+| **`convex/schema.ts`（数据表结构）** | 先按 **§12 强制流程**「先导出 dev + prod → 改 → 再导入」，再推送；并更新 §4 表格、§5 相关规则。**绝不许用清空生产库代替迁移** |
 | 任何 Convex 函数的增删改名、入参或返回结构 | §7 API 一览；若是新错误码 → §5 + `src/lib/ui.ts` 的 `ERROR_MESSAGES` |
 | 业务规则/不变量（状态派生、迭代冻结、工时语义…） | §5（这是最需要精确的一节） |
 | 权限守卫或成员/管理员语义 | §6 |
@@ -624,5 +642,8 @@ dev 与 prod 是**两个独立数据库**（见 §9），schema 要分别推送�
 1. 动手前先读本文件；只有本文件没覆盖的细节才去读源码。
 2. 不要"顺手"重构成与本文件描述不符的形态；若确实要改约定，同时改本文件。
 3. 改后端行为后**必须至少跑 `npm run typecheck`**（本项目没有测试，这是唯一的自动化防线）。
-4. 任何 `--replace` / reset / purge 类命令前先 `project-snapshot.mjs backup`，并明确当前 deployment 不是生产库。
+4. ⛔ **绝不删除生产库（prod）的数据**：不许 `reset` / `purge` / 用空数据 `import --prod --replace`、
+   不许删光表里的行。要移除具体记录就用业务 mutation 或定向脚本按 id 删。
+   任何 `--replace` / reset / purge 类命令前先 `backup-deployments.sh` 导出，并确认当前 deployment 不是生产库；
+   改表结构一律走「**先导出 → 改 → 再导入**」。
 5. 交付时明确说明：改了哪些文件、跑了什么验证、本文件哪几节同步更新了。

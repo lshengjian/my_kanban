@@ -2,13 +2,14 @@
 # Wipe every table in a Convex deployment.
 #
 #   bash scripts/reset-data.sh          # 开发测试环境（.env.local 指定的 deployment）
-#   bash scripts/reset-data.sh --prod   # 生产环境
+#   ALLOW_PROD_RESET=1 bash scripts/reset-data.sh --prod   # 生产环境（默认被拒绝）
 #
 # The "first registered user becomes admin" rule only holds on an empty
 # `users` table, so run this before handing a fresh app to a user.
 #
-# ⚠️ DESTRUCTIVE and has no confirmation gate — back up first:
-#      bash scripts/backup-deployments.sh
+# ⛔ 生产库（prod）的数据**不可删除** —— 见 AGENTS.md §2/§12。默认传 `--prod` 会直接拒绝执行；
+#    只有显式设置 ALLOW_PROD_RESET=1（且已 `backup-deployments.sh` 导出）才放行。
+#    prod 要改表结构时走「先导出、再改、再导入」，不是清空重来。
 #
 # `convex import` runs server-side asynchronously, so this script (a) retries
 # each table against transient rate limiting and (b) waits until the wipe is
@@ -22,7 +23,27 @@ cd "$(dirname "$0")/.."
 
 PROD_FLAG=()
 if [[ "${1:-}" == "--prod" ]]; then
+  if [[ "${ALLOW_PROD_RESET:-}" != "1" ]]; then
+    cat >&2 <<'EOF'
+
+⛔ 拒绝执行：--prod 会清空**生产库**，而生产库的数据不可删除（见 AGENTS.md §2 / §12）。
+
+   需要改生产库的表结构时，正确做法是「先导出、再改、再导入」：
+       bash scripts/backup-deployments.sh
+       # 改 schema -> npx convex deploy
+       npx convex import --prod --replace backups/<时间戳>/prod.zip
+
+   确实要清空生产库（例如确认过数据无用）时，先导出再显式放行：
+       bash scripts/backup-deployments.sh
+       ALLOW_PROD_RESET=1 bash scripts/reset-data.sh --prod
+
+EOF
+    exit 1
+  fi
+  echo "⚠️  ALLOW_PROD_RESET=1 —— 即将清空**生产库**的全部 15 张表。" >&2
   PROD_FLAG=(--prod)
+else
+  echo "⚠️  即将清空**开发测试库**的全部 15 张表。注意 dev 已可能存有真实数据（见 AGENTS.md §2）。" >&2
 fi
 
 # Every table in convex/schema.ts. Keep this list in step with the schema: an
