@@ -1660,8 +1660,14 @@ label { font-size: 0.875rem; }
   text-align: center;
 }
 
-.effort-k { font-size: 0.6875rem; color: var(--text-faint); }
+/* 统计项的标签原来只有 11px + --text-faint，又小又淡，读起来吃力。
+   提到与正文同级并换成 --text-dim，让「预计 / 实际 / 偏差」一眼能读。 */
+.effort-k { font-size: 0.8125rem; font-weight: 500; color: var(--text-dim); }
 .effort-v { font-size: 1.25rem; font-weight: 640; font-variant-numeric: tabular-nums; }
+
+/* 同一弹窗里按类别分的工时表也一并提亮；只作用于这张表，不动其它页面的 .table。 */
+.effort-table th { font-size: 0.78125rem; color: var(--text-dim); }
+.effort-table td { font-size: 0.875rem; }
 
 .effort-cell.over  { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
 .effort-cell.over  .effort-v { color: var(--warning); }
@@ -1672,6 +1678,9 @@ label { font-size: 0.875rem; }
   .effort-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .effort-cell { padding: 10px 6px; }
   .effort-v { font-size: 1.0625rem; }
+  /* 手机上也不低于 12px，别退回原来的 11px。 */
+  .effort-k { font-size: 0.75rem; }
+  .effort-table th, .effort-table td { font-size: 0.75rem; }
 }
 
 /* ---- project list: scope switch + pagination ---- */

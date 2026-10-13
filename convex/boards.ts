@@ -49,7 +49,6 @@ const boardSummaryValidator = v.object({
 const goalRowValidator = v.object({
   _id: v.id("goals"),
   title: v.string(),
-  description: v.string(),
   labelId: v.optional(v.id("labels")),
   sprintId: v.optional(v.id("boards")),
   columnId: v.id("columns"),
@@ -276,7 +275,6 @@ export const getBoard = query({
       return {
         _id: goal._id,
         title: goal.title,
-        description: goal.description,
         labelId: goal.labelId,
         sprintId: goal.sprintId,
         columnId: goal.columnId,

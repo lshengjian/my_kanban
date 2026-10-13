@@ -193,11 +193,8 @@ snapshots/               数据快照（已 gitignore）
 - **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；它的状态列完全由任务派生。
 - **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
 - 一个任务可以服务多个目标项（`goalTasks` 多对多）。
-- **卡片不填描述**：目标项与任务项都只以名称表达，UI 里**没有任何描述输入框**
-  （任务项在 schema 里本来就没有 `description` 字段）。
-  `goals.description` 这个列**仍保留在 schema 里**，`createGoal` 会写入 `""`、
-  `updateGoal` 也仍接受它 —— 属于**已弃用但未删除**的字段，为的是不做破坏性迁移、
-  也不丢历史数据。真正的删除需要改 `convex/schema.ts` 并跑迁移，得按 §12 的流程来。
+- **卡片不填描述**：目标项与任务项都只以名称表达。UI 里没有任何描述输入框，
+  schema 里也**没有** `description` 字段（`goals.description` 已于 2026-10-13 删除）。
 - **新建卡片只要名称，类别后置**：新增目标项只有一个名称输入框；新增任务项只收名称 / 负责人 /
   预计完成日期 / 关联目标项。类别在**详情面板**里设置 —— 目标项在 `GoalDrawer`，任务项在 `TaskEditor`，
   两边都**可选**（下拉里有「未分类」）。服务端 `createGoal` / `createTask` 的 `labelId` 因此是可选参数。
@@ -271,7 +268,7 @@ snapshots/               数据快照（已 gitignore）
 - 燃尽图表一表两用，靠 `scope` 区分：
   - `sprint`：x = 迭代内日期（`"YYYY-MM-DD"`），y = **剩余工时**（未完成任务的 `estimatedHours` 之和）。
     注意：预计工时在「开始执行」时才录入，所以**没人认领的任务暂时不计入**。
-  - `release`：x = 迭代 id，y = **剩余客户价值估计**（`completedAt === undefined` 的 goals 的 `value` 之和）。
+  - `release`：x = 迭代 id，y = **成果的价值估计**（`completedAt === undefined` 的 goals 的 `value` 之和；UI 纵轴文案即此）。
     未估值的项目贡献 0。
 - `baseline` = 迭代开始时的工时 / 立项时的点数；`ideal` 为直线。
 - 写入是**按 key upsert**：重开一个目标项会改写当天读数而不是追加一行。
@@ -280,12 +277,15 @@ snapshots/               数据快照（已 gitignore）
 ### 检查项与附件
 
 - 检查项（`checklistItems`）是**目标项的验收条件**，与任务表完全独立；文本上限 300。
-  **UI 里只保留文本**：不记检查人、也不记检查时间（`assigneeId` / `checkDate` 两个列仍在 schema 与
-  `addCheck` 入参里，属**已弃用但未删除**，服务端本来就把它们当可选参数）。
-  历史上那两个 `CHECK_ASSIGNEE_REQUIRED` / `CHECK_DATE_REQUIRED` 错误码**服务端早已不再抛出**
-  （只有客户端 `ERROR_MESSAGES` 还留着），已随这次改动一并删掉。
+  **只有文本**：不记检查人、也不记检查时间 —— `assigneeId` / `checkDate` 已于 2026-10-13
+  从 schema、`addCheck`/`updateCheck` 入参与客户端类型里**全部删除**。
+  配套的 `CHECK_ASSIGNEE_REQUIRED` / `CHECK_DATE_REQUIRED` 错误码此前已删。
 - 附件上限 **20 MB**；`isImage` 由**服务端**按 content type 判定（png/jpeg/gif/webp/svg+xml/avif），客户端无法伪装。
-- 图片返回内联可渲染 URL；文档走 `getAttachmentUrl` 取一次性签名 URL 后下载。
+- **`listAttachments` 给每个附件都返回签名 `url`**（图片直接用它渲染，文档用它下载）。
+  存储域名与页面**不同源**（`*.convex.cloud`），所以**不能只靠 `<a download>`**：跨域时浏览器会忽略
+  download 属性，而且 Convex 不返回 `Content-Disposition`。前端的做法是
+  `fetch(url)` 取回字节 → `URL.createObjectURL` → 用原名保存；取回失败才退化为打开签名 URL。
+  实测：带 `Origin` 的 GET 会返回 `Access-Control-Allow-Origin`，所以 `fetch` 可用。
 - `ctx.storage.delete` 是 best-effort（存储非事务），失败只留下孤儿 blob，不报错。
 
 ### 其他约束速查
@@ -342,7 +342,7 @@ snapshots/               数据快照（已 gitignore）
 - **labels.ts**：`listLabels` `createLabel` `updateLabel` `deleteLabel` `moveLabel`
 - **templates.ts**：`listTemplates` `createTemplate` `updateTemplate` `deleteTemplate`
 - **attachments.ts**：`listChecks` `addCheck` `toggleCheck` `updateCheck` `deleteCheck`
-  `generateUploadUrl` `createAttachment` `listAttachments` `getAttachmentUrl` `deleteAttachment`
+  `generateUploadUrl` `createAttachment` `listAttachments` `deleteAttachment`
 - **progress.ts**：`getProjectProgress` `getSprintBurndown` `getReleaseBurndown` `snapshotBurndown`（另 re-export `columnsOfBoard`）
 
 - 两个契约细节（改之前先读 §5）：
@@ -548,18 +548,15 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   `vite build` 也会打出 `css-syntax-error` 警告（不阻断构建）。
   位于「2024 refresh」追加层，疑似编辑时把选择器行误删；仓库无历史提交可对照，
   **无法确定原选择器，故未擅自补上** —— 修它需要先确认这些声明原本属于哪个元素。
-- **`goals.description` 是已弃用但未删除的字段**：UI 已完全不收集、不显示描述（见 §5）。
-  它仍在 schema 与 `createGoal` / `updateGoal` 的入参里，`createGoal` 固定写 `""`。
-  要真正删列需按 §12 走（备份 dev + prod → 改 schema → 迁移清掉已有文档上的该字段 → 推送）。
 - `ProjectPage.submitBoard` **不传 `description`**（服务端 `createBoard` 也无此参数）→ 新建迭代弹窗里的
   「描述（可选）」输入框**是死的**，用户填了会被静默丢弃。属于与上面同类的"描述残留"，
   要么补上 `createBoard` 的 description 参数，要么把这个输入框删掉。
-- `AttachmentSection` 把 `getAttachmentUrl` 这个 query 用 `useQuery(api.x, "skip")` + 强制类型转换当**一次性命令式函数**调用 —— 非常规但刻意。
+- 曾经把 `getAttachmentUrl` 用 `useQuery(api.x, "skip")` + 类型强转当**命令式函数**用 —— 那其实是**坏的**：
+  `useQuery` 返回的是查询结果（`string | undefined`）而不是可调用函数，`getUrl(...)` 必然抛
+  `TypeError`，于是**所有**附件下载都失败；因为下载按钮只在非图片上出现，所以只在 PDF/Word 上暴露。
+  2026-10-13 已修（改为 `listAttachments` 直接返回 `url`）并删除该函数。
+  **教训：不要拿 `useQuery`/`useMutation` 当命令式 API，也不要靠 `as unknown as` 掩盖类型不符。**
 - 多处 mutation 缺 try/catch → 未处理的 rejection：`BoardPage` 的排序按钮、移出迭代、检查项 toggle/remove。
-- **`checklistItems.assigneeId` / `checkDate` 是已弃用但未删除的字段**：UI 只保留检查项文本（见 §5）。
-  两列仍在 schema 与 `addCheck` / `updateCheck` 入参里，服务端一向把它们当可选参数。
-  要真正删列同样得按 §12 走。历史上配套的 `CHECK_ASSIGNEE_REQUIRED` / `CHECK_DATE_REQUIRED`
-  两个错误码已从 `ERROR_MESSAGES` 删除（服务端早就不抛它们了）。
 - `overdue` 在渲染时用 `Date.now()` 计算 → 页面常开不会自动翻转。
 - `SprintHeader` 内 `board.kind === "sprint" ? … : "skip"` 恒真（该组件只在 sprint 下渲染）。
 - `BoardPage` 早退 `if (!data) return "加载中…"` → 加载与错误不区分。
@@ -567,7 +564,6 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
 - 直接展示了错误码字符串 `"INVALID_CUSTOMER_VALUE"` 而非走 `describeError`。
 - `ProjectsPage` 的 `listMyJoinRequests` 未加 `"skip"` 守卫（其余 query 都有）。
 - `listAllProjects` 返回的 `role` 是按 `ownerId` 推的，不代表调用者的真实成员关系。
-- `types.ts` 与 `ProjectPage` 注释里"剩余故事点"是旧叫法，实际纵轴是「剩余客户价值估计」。
 
 ---
 
@@ -617,6 +613,29 @@ npx convex import --prod --replace backups/<时间戳>/prod.zip
 - dev：`npx convex function-spec` 确认 args/returns 校验器符合预期；dev 的报错信息完整，可直接看错误码。
 - prod：只能靠**成功返回**判断（`auth:me` 返回 `{"status":"success","value":null}`）。
   **prod 的错误信息被脱敏**（见 §11），拿错误文案做判据会误判成"函数不存在"。
+
+### 删字段：必须先清数据、再删 schema，且分三次推送
+
+**Convex 推送时会校验既有文档**，所以删字段不能一步到位（2026-10-13 实删 `goals.description` 时踩全了）：
+
+| 错误做法 | 报错 |
+| --- | --- |
+| 先删 schema、数据还留着 | `Object contains extra field '…' that is not in the validator` |
+| 字段仍必填、却 patch 成 `undefined` | `Object is missing the required field '…'` |
+
+正确顺序（**三次推送**）：
+
+```bash
+# ① 把 schema 里的字段放宽为 v.optional(...)（用 TEMP-MIGRATION 注释标好）→ 推送 dev
+# ② 加一次性 internalMutation 把数据上的字段 patch 掉 → 推送 dev 并 npx convex run 执行 → 核对
+# ③ 彻底删掉 schema 字段 + 删掉临时函数 → 推送 dev 和 prod
+```
+
+- `import --table … --replace` **替代不了**第 ② 步：旧 schema 下会被"缺少必填字段"拒；新 schema 又推不上。
+- `import --table … --replace` 是**事务性**的，校验失败**不会**先清表（实测数据完好）。
+- `npx convex dev --once` 在非交互终端遇到校验失败可能**只挂住不报错**；用
+  `script -q /dev/null npx convex dev --once` 才看得到错误。
+- 详见《[维护手册](docs/维护手册.md)》第 7 节步骤 5。
 
 ### 为什么两个都要备份
 

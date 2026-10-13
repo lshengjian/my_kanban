@@ -29,7 +29,6 @@ export type BoardLabel = {
 export type Goal = {
   _id: Id<"goals">;
   title: string;
-  description: string;
   /** A reference to the category; name and colour live on the label row. */
   labelId?: Id<"labels">;
   sprintId?: Id<"boards">;
@@ -154,13 +153,11 @@ export type CheckItem = {
   goalId: Id<"goals">;
   text: string;
   done: boolean;
-  assigneeId?: Id<"users">;
-  checkDate?: number;
   position: number;
   createdAt: number;
 };
 
-/** 附件. Images carry a `url` so schematics render inline. */
+/** 附件. Every row carries a signed `url`: images render, documents download. */
 export type Attachment = {
   _id: Id<"attachments">;
   name: string;

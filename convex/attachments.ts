@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { logActivity } from "./lib/activity";
-import { isProjectMember, requireBoardMember, requireUser } from "./lib/auth";
+import { requireBoardMember, requireUser } from "./lib/auth";
 
 /* ------------------------------------------------------------------ *
  * 检查列表 — acceptance criteria on a 目标项
@@ -14,8 +14,6 @@ const checkValidator = v.object({
   goalId: v.id("goals"),
   text: v.string(),
   done: v.boolean(),
-  assigneeId: v.optional(v.id("users")),
-  checkDate: v.optional(v.number()),
   position: v.number(),
   createdAt: v.number(),
 });
@@ -44,8 +42,6 @@ export const listChecks = query({
         goalId: i.goalId,
         text: i.text,
         done: i.done,
-        assigneeId: i.assigneeId,
-        checkDate: i.checkDate,
         position: i.position,
         createdAt: i.createdAt,
       })),
@@ -60,8 +56,6 @@ export const addCheck = mutation({
     token: v.optional(v.string()),
     goalId: v.id("goals"),
     text: v.string(),
-    assigneeId: v.optional(v.id("users")),
-    checkDate: v.optional(v.number()),
   },
   returns: v.id("checklistItems"),
   handler: async (ctx, args) => {
@@ -73,12 +67,6 @@ export const addCheck = mutation({
     const text = args.text.trim();
     if (text.length < 1 || text.length > MAX_TEXT) throw new Error("INVALID_TEXT");
 
-    if (args.assigneeId !== undefined) {
-      if (!(await isProjectMember(ctx, goal.projectId, args.assigneeId))) {
-        throw new Error("ASSIGNEE_NOT_A_MEMBER");
-      }
-    }
-
     const existing = await ctx.db
       .query("checklistItems")
       .withIndex("by_goal", (q) => q.eq("goalId", goal._id))
@@ -89,8 +77,6 @@ export const addCheck = mutation({
       goalId: goal._id,
       text,
       done: false,
-      assigneeId: args.assigneeId,
-      checkDate: args.checkDate,
       position: existing.length,
       createdBy: user._id,
       createdAt: Date.now(),
@@ -129,8 +115,6 @@ export const updateCheck = mutation({
     token: v.optional(v.string()),
     checkId: v.id("checklistItems"),
     text: v.optional(v.string()),
-    assigneeId: v.optional(v.union(v.id("users"), v.null())),
-    checkDate: v.optional(v.union(v.number(), v.null())),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -147,20 +131,6 @@ export const updateCheck = mutation({
       if (text.length < 1 || text.length > MAX_TEXT) throw new Error("INVALID_TEXT");
       patch.text = text;
     }
-    if (args.assigneeId !== undefined) {
-      if (args.assigneeId !== null) {
-        if (!(await isProjectMember(ctx, goal.projectId, args.assigneeId))) {
-          throw new Error("ASSIGNEE_NOT_A_MEMBER");
-        }
-        patch.assigneeId = args.assigneeId;
-      } else {
-        patch.assigneeId = undefined;
-      }
-    }
-    if (args.checkDate !== undefined) {
-      patch.checkDate = args.checkDate === null ? undefined : args.checkDate;
-    }
-
     if (Object.keys(patch).length > 0) await ctx.db.patch(check._id, patch);
     return null;
   },
@@ -216,7 +186,7 @@ const attachmentValidator = v.object({
   size: v.number(),
   isImage: v.boolean(),
   createdAt: v.number(),
-  /** Present only for images, so the card can render them straight away. */
+  /** Signed storage URL: images render from it, documents download from it. */
   url: v.optional(v.string()),
 });
 
@@ -327,28 +297,10 @@ export const listAttachments = query({
         size: row.size,
         isImage: row.isImage,
         createdAt: row.createdAt,
-        url: row.isImage ? ((await ctx.storage.getUrl(row.storageId)) ?? undefined) : undefined,
+        url: (await ctx.storage.getUrl(row.storageId)) ?? undefined,
       });
     }
     return out;
-  },
-});
-
-/** One-shot signed URL for downloading a non-image attachment. */
-export const getAttachmentUrl = query({
-  args: { token: v.optional(v.string()), attachmentId: v.id("attachments") },
-  returns: v.string(),
-  handler: async (ctx, args) => {
-    const user = await requireUser(ctx, args.token);
-    const row = await ctx.db.get(args.attachmentId);
-    if (!row) throw new Error("ATTACHMENT_NOT_FOUND");
-    const goal = await ctx.db.get(row.goalId);
-    if (!goal) throw new Error("GOAL_NOT_FOUND");
-    await requireBoardMember(ctx, goal.boardId, user._id);
-
-    const url = await ctx.storage.getUrl(row.storageId);
-    if (!url) throw new Error("FILE_MISSING");
-    return url;
   },
 });
 

@@ -904,7 +904,7 @@ function EffortStats({ token, boardId, onClose }: {
           </p>
 
           {stats.byLabel.length > 0 && (
-            <table className="table" style={{ marginTop: 12 }}>
+            <table className="table effort-table" style={{ marginTop: 12 }}>
               <thead>
                 <tr>
                   <th>类别</th>
@@ -1379,9 +1379,6 @@ function AttachmentSection({ token, goal }: { token: string; goal: Goal }) {
   const generate = useMutation(api.attachments.generateUploadUrl);
   const create = useMutation(api.attachments.createAttachment);
   const remove = useMutation(api.attachments.deleteAttachment);
-  const getUrl = useQuery(api.attachments.getAttachmentUrl, "skip") as unknown as (
-    args: { token: string; attachmentId: Id<"attachments"> },
-  ) => Promise<string>;
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
@@ -1421,17 +1418,33 @@ function AttachmentSection({ token, goal }: { token: string; goal: Goal }) {
     }
   };
 
+  /**
+   * 下载非图片附件。
+   *
+   * 存储 URL 与页面**不同源**，跨域时浏览器会忽略 `<a download>` 的 download 属性
+   * （还会因为 `target="_blank"` 变成"打开新标签页"），所以先把字节取回来，
+   * 再用 object URL 触发保存 —— 文件名由我们指定，PDF/Word 都能真正落盘。
+   */
   const download = async (attachment: Attachment) => {
+    const url = attachment.url;
+    if (!url) {
+      setError("附件地址不可用，请刷新后重试");
+      return;
+    }
+    setError(null);
     try {
-      const url = await getUrl({ token, attachmentId: attachment._id });
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = objectUrl;
       a.download = attachment.name;
-      a.target = "_blank";
-      a.rel = "noopener";
       a.click();
-    } catch (err) {
-      setError(describeError(err));
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      // 取回失败（例如被跨域策略拦下）时退化为打开签名 URL，浏览器通常会自行下载。
+      window.open(url, "_blank", "noopener");
     }
   };
 

@@ -119,7 +119,6 @@ export const createGoal = mutation({
     boardId: v.id("boards"),
     columnId: v.optional(v.id("columns")),
     title: v.string(),
-    description: v.optional(v.string()),
     // 类别 is optional: a 目标项 is captured by name first and categorised
     // later from its detail panel.
     labelId: v.optional(v.id("labels")),
@@ -158,7 +157,6 @@ export const createGoal = mutation({
       boardId: args.boardId,
       columnId: column._id,
       title,
-      description: args.description ?? "",
       labelId: await labelOfBoard(ctx, args.boardId, args.labelId),
       value,
       position: args.position ?? Number.MAX_SAFE_INTEGER,
@@ -186,7 +184,6 @@ export const updateGoal = mutation({
     token: v.optional(v.string()),
     goalId: v.id("goals"),
     title: v.optional(v.string()),
-    description: v.optional(v.string()),
     labelId: v.optional(v.union(v.id("labels"), v.null())),
     /** 客户价值估计 — 1~10；null 表示清空。修改会刷新发布燃尽图。 */
     value: v.optional(v.union(v.number(), v.null())),
@@ -207,7 +204,6 @@ export const updateGoal = mutation({
       if (title.length < 1 || title.length > MAX_TITLE) throw new Error("INVALID_TITLE");
       patch.title = title;
     }
-    if (args.description !== undefined) patch.description = args.description;
     if (args.labelId !== undefined) {
       patch.labelId =
         args.labelId === null ? undefined : await labelOfBoard(ctx, goal.boardId, args.labelId);

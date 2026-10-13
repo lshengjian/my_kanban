@@ -34,7 +34,7 @@ export default function ProjectPage({
 }) {
   const toast = useToast();
   const detail = useQuery(api.projects.getProject, { token, projectId });
-  // x = 迭代, y = PBL 剩余故事点.
+  // x = 迭代, y = 成果的价值估计之和.
   const release = useQuery(api.progress.getReleaseBurndown, { token, projectId });
   const [showRelease, setShowRelease] = useState(false);
   const boards = useQuery(api.boards.listBoards, { token, projectId });
@@ -182,13 +182,13 @@ export default function ProjectPage({
           <div className="row" style={{ marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontSize: 15 }}>发布燃尽图</h3>
             <div className="spacer" />
-            <span className="faint" style={{ fontSize: 12 }}>横轴＝迭代 · 纵轴＝剩余客户价值估计</span>
+            <span className="faint" style={{ fontSize: 12 }}>横轴＝迭代 · 纵轴＝成果的价值估计</span>
           </div>
           <BurndownChart
             labels={(release?.points ?? []).map((p) => p.label)}
             remaining={(release?.points ?? []).map((p) => p.remaining)}
             ideal={(release?.points ?? []).map((p) => p.ideal)}
-            unitLabel="PBL 剩余客户价值估计"
+            unitLabel="成果的价值估计"
             emptyHint="还没有迭代记录。新建迭代后会开始绘制。"
           />
         </div>

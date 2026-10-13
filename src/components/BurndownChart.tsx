@@ -11,7 +11,7 @@ export type BurndownChartProps = {
   remaining: number[];
   /** The straight target line, drawn dashed behind it. */
   ideal: number[];
-  /** "剩余工时（小时）" or "剩余故事点". */
+  /** 纵轴单位文案，例如 "剩余工时（小时）" 或 "成果的价值估计"。 */
   unitLabel: string;
   /** Shown when there is nothing worth plotting yet. */
   emptyHint?: string;

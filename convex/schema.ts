@@ -143,7 +143,6 @@ export default defineSchema({
     boardId: v.id("boards"),
     columnId: v.id("columns"),
     title: v.string(),
-    description: v.string(),
     // A reference, not a copy: the name and colour live on the label row.
     // Deleting the label is blocked while a card still points at it.
     labelId: v.optional(v.id("labels")),
@@ -223,9 +222,6 @@ export default defineSchema({
     goalId: v.id("goals"),
     text: v.string(),
     done: v.boolean(),
-    // Optional per-entry ownership, shown when the goal is inside an 迭代.
-    assigneeId: v.optional(v.id("users")),
-    checkDate: v.optional(v.number()),
     position: v.number(),
     createdBy: v.id("users"),
     createdAt: v.number(),
@@ -276,7 +272,7 @@ export default defineSchema({
   //   sprint  — x = calendar day inside one 迭代,
   //             y = 剩余工时 of that sprint's SBL tasks.
   //   release — x = 迭代,
-  //             y = 剩余故事点 of the PBL items not yet completed.
+  //             y = 成果的价值估计 of the goals not yet completed.
   //
   // `key` is the x value: "2026-03-14" for a sprint day, or the sprint's id
   // for a release point. One row per (scope, board, key), upserted in place so
