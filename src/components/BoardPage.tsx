@@ -1332,13 +1332,15 @@ function GoalDrawer({
         </div>
         {error && <div className="error-text">{error}</div>}
 
+        <CheckListSection token={token} goal={goal} />
+        <AttachmentSection token={token} goal={goal} />
+
+        {/* 变更历史放在抽屉**最后**：它是只读的追溯信息，不该挡在检查列表、
+            附件这些要动手的内容前面。 */}
         <div className="field">
           <label>变更历史</label>
           <ActivityFeed token={token} goalId={goal._id} emptyHint="这个目标项还没有变更记录" />
         </div>
-
-        <CheckListSection token={token} goal={goal} />
-        <AttachmentSection token={token} goal={goal} />
       </div>
     </Drawer>
   );
