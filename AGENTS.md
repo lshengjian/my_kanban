@@ -254,6 +254,9 @@ snapshots/               数据快照（已 gitignore）
 - **排入迭代（`planGoalToSprint`）只允许 未开始 的迭代** —— 迭代一旦开始，范围冻结（`SPRINT_NOT_PLANNED`）。
 - **移出迭代**（`sprintId: undefined`）会连带删除该目标项的任务：任务属于迭代，会变孤儿；
   但**检查项与附件跟随目标项，保留不动**。
+  ⚠️ **因此「移出迭代」是 owner 专属**（`requireProjectOwnerOf`），一般成员只能排入、不能撤出 ——
+  否则任何人都能连带删掉别人登记的任务。2026-10-13 修：在此之前它只要求「是项目成员」。
+  前端也用两步 `ConfirmButton` 提示「确认移出并删除任务」，别把确认文案改回单纯「移出迭代」。
 - 迭代名称留空时服务端自动命名为 `迭代 N`（N = 现有最大编号 + 1）。
 
 ### 卡片类型 / 标签（`labels.ts`, `templates.ts`, `lib/labelPresets.ts`）
@@ -323,7 +326,7 @@ snapshots/               数据快照（已 gitignore）
 | `requireAdmin` | 全局管理员 | `FORBIDDEN` |
 | `requireProjectMember` | **写权限的唯一依据**：必须是项目成员 | `PROJECT_NOT_FOUND` / `NOT_A_PROJECT_MEMBER` |
 | `requireBoardMember` | 由看板反查项目并要求成员 | `BOARD_NOT_FOUND` |
-| `requireProjectOwnerOf` | 项目 owner 专属：建看板、加目标项 | `PROJECT_OWNER_ONLY` |
+| `requireProjectOwnerOf` | 项目 owner 专属：建看板、加目标项、移动目标项所在列、移出迭代 | `PROJECT_OWNER_ONLY` |
 | `requireLabelEditor` | 系统预设要 admin；项目标签要 owner | `FORBIDDEN` / `PROJECT_OWNER_ONLY` |
 | `requireColumnOfBoard` | 列必须属于该看板 | `COLUMN_NOT_FOUND` |
 
@@ -357,6 +360,8 @@ snapshots/               数据快照（已 gitignore）
 - **activity.ts**：`listActivity`（项目全部事件）`listGoalActivity`（单个目标项）—— 两者都**按时间倒序**返回
 - **progress.ts**：`getProjectProgress` `getSprintBurndown` `getReleaseBurndown` `snapshotBurndown`（另 re-export `columnsOfBoard`）
 
+- `planGoalToSprint` 一个函数两种权限：**排入**只要项目成员，**移出**（`sprintId: undefined`，
+  会删任务）要 owner。改这个函数时别把两道守卫合并成一道。
 - 两个契约细节（改之前先读 §5）：
   `createGoal` / `createTask` 的 `labelId` 是**可选**参数（新建只给名称，类别后置）；
   `boards.getBoard` 同时返回 `labels`（本看板词表，供任务项）与 `goalLabels`（预期成果看板词表，供目标项）。
@@ -565,6 +570,10 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   这是产品环境可用性的前提，不是可选优化。
 - `convex/progress.ts` 的 `effortStats` 与 `listTasks` 的 **returns 校验器**里 `labelId` 仍是 `v.optional` —— 这是对的
   （历史数据可能无类别），不要跟着 args 一起收紧。
+- `PROJECT_OWNER_ONLY` 这个码被 `requireProjectOwnerOf` 的**所有**调用点共用（建看板、加目标项、
+  移列、移出迭代、改看板标签），所以 `src/lib/ui.ts` 里的文案必须是**通用**的
+  （现在：「只有项目经理可以执行此操作」）。2026-10-13 之前写的是「只有项目经理可以修改看板标签」，
+  导致加目标项被拒时提示的是标签的事。
 
 **尚未实现（用户已提出，设计已定）**
 

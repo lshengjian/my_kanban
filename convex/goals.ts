@@ -359,8 +359,11 @@ export const planGoalToSprint = mutation({
     await requireBoardMember(ctx, goal.boardId, user._id);
 
     if (args.sprintId === undefined) {
-      // 移出迭代: the goal's tasks belong to that iteration and would be
-      // orphaned, so they are cleared with it.
+      // 移出迭代是**破坏性**操作：目标项的任务属于迭代，会一并被删除。
+      // 因此只有项目 owner 能做 —— 一般成员可以排入（规划），但不能把目标项撤出
+      // 迭代、从而连带删掉别人已经登记的任务。
+      await requireProjectOwnerOf(ctx, goal.projectId, user._id);
+
       // Checks and attachments live with the goal, so they are untouched here;
       // only the sprint-scoped tasks are cleared.
       if (goal.sprintId) {

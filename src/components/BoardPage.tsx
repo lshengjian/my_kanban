@@ -4,7 +4,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { DAY_MS, GOAL_COLUMNS, SPRINT_STATUS_META, TASK_STATUS_META } from "../../convex/lib/constants";
 import type { Attachment, BoardData, Goal, PublicUser, Task } from "./types";
-import { Drawer, Modal, ProgressBar, useToast } from "./ui";
+import { ConfirmButton, Drawer, Modal, ProgressBar, useToast } from "./ui";
 import BurndownChart from "./BurndownChart";
 import LabelManager from "./LabelManager";
 import { describeError, formatDate } from "../lib/ui";
@@ -59,16 +59,16 @@ function findLabel(labels: BoardData["labels"], id?: Id<"labels">) {
 function ProductList({
   data,
   token,
-  canAddGoals,
-  canMoveGoals,
+  isOwner,
   onOpenGoal,
 }: {
   data: BoardData;
   token: string;
-  /** Only the project owner authors the product list. */
-  canAddGoals: boolean;
-  /** Only the project owner moves 目标项 between columns. */
-  canMoveGoals: boolean;
+  /**
+   * 只有项目 owner 能改成果看板：新增目标项、在列之间移动、把目标项移出迭代
+   * （移出会连带删除该目标项的任务，所以不能开放给一般成员）。
+   */
+  isOwner: boolean;
   onOpenGoal: (goal: Goal) => void;
 }) {
   const createGoal = useMutation(api.goals.createGoal);
@@ -175,20 +175,22 @@ function ProductList({
                     </div>
                   )}
 
-                  {goal.sprintId && (
+                  {/* 移出迭代会**连带删除该目标项的任务**（任务属于迭代，会变孤儿），
+                      所以：① 只给 owner 看；② 必须两步确认，且确认文案里写明后果。 */}
+                  {goal.sprintId && isOwner && (
                     <div className="card-actions">
-                      <button
+                      <ConfirmButton
+                        label="移出迭代"
+                        confirmLabel="确认移出并删除任务"
                         className="btn btn-sm btn-ghost"
-                        onClick={() => plan({ token, goalId: goal._id })}
-                      >
-                        移出迭代
-                      </button>
+                        onConfirm={() => plan({ token, goalId: goal._id })}
+                      />
                     </div>
                   )}
 
                   {/* 目标项与任务解耦：简单的项目可以完全不管任务，由 owner 直接
                       把卡片移到目标列。每次移动都会写进活动日志（见 goal_moved）。 */}
-                  {canMoveGoals && (
+                  {isOwner && (
                     <div className="card-actions">
                       <span className="muted" style={{ fontSize: 11.5 }}>
                         移到
@@ -215,7 +217,7 @@ function ProductList({
                 </article>
               ))}
 
-              {column._id === intakeColumnId && canAddGoals && (
+              {column._id === intakeColumnId && isOwner && (
                 <div className="quick-add">
                   <input
                     className="input"
@@ -1144,8 +1146,7 @@ export default function BoardPage({
         <ProductList
           data={data}
           token={token}
-          canAddGoals={isProjectOwner}
-          canMoveGoals={isProjectOwner}
+          isOwner={isProjectOwner}
           onOpenGoal={setOpenGoal}
         />
       ) : (

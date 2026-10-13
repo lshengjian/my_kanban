@@ -138,7 +138,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   SPRINT_CLOSED: "该迭代已结束，无法再排入",
   ASSIGNEE_REQUIRED: "排入迭代前，请先为该需求指定负责人和截止日期",
   DUE_DATE_REQUIRED: "排入迭代前，请先为该需求设定截止日期",
-  PROJECT_OWNER_ONLY: "只有项目经理可以修改看板标签",
+  PROJECT_OWNER_ONLY: "只有项目经理可以执行此操作",
   LABEL_NOT_ON_BOARD: "标签不属于当前看板",
   LABEL_NOT_FOUND: "标签不存在",
   LABEL_IN_USE: "该类型下还有卡片在用，请先改掉它们的分类，或直接修改这个类型的名称和颜色",
