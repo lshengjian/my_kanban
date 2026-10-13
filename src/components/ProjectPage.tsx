@@ -482,7 +482,7 @@ export default function ProjectPage({
           <div className="spacer" />
           <span className="faint" style={{ fontSize: 12 }}>最新在上</span>
         </div>
-        <ActivityFeed token={token} projectId={projectId} />
+        <ActivityFeed token={token} projectId={projectId} previewLimit={5} />
       </div>
 
       {/* Modals */}
