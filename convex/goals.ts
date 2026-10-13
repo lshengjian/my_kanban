@@ -44,43 +44,24 @@ export async function tasksOfGoal(
 }
 
 /**
- * A goal is 完成 only when it has at least one task and *all* of them are done.
+ * 把目标项放进某一列，维护 `completedAt` 并刷新燃尽图。
  *
- * A goal with no tasks is deliberately not complete: "all of an empty set" is
- * vacuously true, which would silently complete every freshly created goal.
+ * 手工移动（`moveGoal`）与排入/移出迭代（`syncGoalStatus`）共用这一段，
+ * 避免两处各写一套、日子久了行为漂移。
  */
-export function isGoalComplete(tasks: Doc<"tasks">[]): boolean {
-  return tasks.length > 0 && tasks.every((t) => t.status === "done");
-}
-
-/**
- * Places a goal in the product list column its state implies and refreshes the
- * burndown of every board that displays it.
- *
- * 待处理 → not committed to an iteration.
- * 处理中 → committed, but still has unfinished work.
- * 已完成 → committed, and every task is done.
- */
-export async function syncGoalStatus(
+async function applyColumn(
   ctx: MutationCtx,
   goal: Doc<"goals">,
+  column: { _id: Id<"columns">; name: string; isDone: boolean },
   actorId: Id<"users">,
-): Promise<{ changed: boolean; columnName: string }> {
-  const tasks = await tasksOfGoal(ctx, goal._id);
-  const complete = isGoalComplete(tasks);
-  const name = complete ? "已完成" : goal.sprintId ? "处理中" : "待处理";
-  const column = await columnNamed(ctx, goal.boardId, name);
-
-  if (goal.columnId === column._id) {
-    return { changed: false, columnName: name };
-  }
-
+  message: string,
+): Promise<void> {
   const from = goal.columnId;
-  const now = Date.now();
   await ctx.db.patch(goal._id, {
     columnId: column._id,
-    updatedAt: now,
-    completedAt: complete ? (goal.completedAt ?? now) : undefined,
+    updatedAt: Date.now(),
+    // 进终态列时记完成时间、离开时清掉 —— 进度与发布燃尽图都读这个字段。
+    completedAt: column.isDone ? (goal.completedAt ?? Date.now()) : undefined,
   });
 
   await logActivity(ctx, {
@@ -89,21 +70,76 @@ export async function syncGoalStatus(
     goalId: goal._id,
     actorId,
     type: "goal_moved",
-    message: complete
-      ? `「${goal.title}」的全部任务已完成，目标进入已完成`
-      : `「${goal.title}」移入${name}`,
+    message,
     fromColumnId: from,
     toColumnId: column._id,
   });
 
-  // Both the product list and the owning 迭代 chart this goal.
+  // 预期成果看板与它所在的迭代都要重画。
   await recordReleaseBurndown(ctx, goal.projectId);
-  if (goal.sprintId) {
-    await recordSprintBurndown(ctx, goal.projectId, goal.sprintId);
-  }
+  if (goal.sprintId) await recordSprintBurndown(ctx, goal.projectId, goal.sprintId);
+}
 
+/**
+ * 排入/移出迭代时同步「待处理 ⇄ 处理中」。
+ *
+ * **注意：目标项的列不再由任务派生。** 任务全部完成**不会**再自动把目标项改成
+ * 「已完成」—— 有些项目只想跟踪目标项本身，完成与否由项目 owner 在成果看板上
+ * 手工移动决定（见 `moveGoal`）。
+ *
+ * 「已完成」是手工结果，因此是**粘性**的：排入迭代不会把它拉回「处理中」。
+ */
+export async function syncGoalStatus(
+  ctx: MutationCtx,
+  goal: Doc<"goals">,
+  actorId: Id<"users">,
+): Promise<{ changed: boolean; columnName: string }> {
+  const done = await columnNamed(ctx, goal.boardId, GOAL_COLUMNS[2]);
+  if (goal.columnId === done._id) return { changed: false, columnName: GOAL_COLUMNS[2] };
+
+  const name = goal.sprintId ? GOAL_COLUMNS[1] : GOAL_COLUMNS[0];
+  const column = await columnNamed(ctx, goal.boardId, name);
+  if (goal.columnId === column._id) return { changed: false, columnName: name };
+
+  await applyColumn(ctx, goal, column, actorId, `「${goal.title}」移入${name}`);
   return { changed: true, columnName: name };
 }
+
+/**
+ * 手工把目标项移到成果看板的另一列 —— **只有项目 owner 可以**。
+ *
+ * 这是「目标项与任务解耦」的入口：简单的项目可以完全不建任务，只靠移动列来跟踪。
+ * 每次移动都写一条 `goal_moved` 日志，前端按时间倒序展示。
+ */
+export const moveGoal = mutation({
+  args: {
+    token: v.optional(v.string()),
+    goalId: v.id("goals"),
+    columnId: v.id("columns"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx, args.token);
+    const goal = await ctx.db.get(args.goalId);
+    if (!goal) throw new Error("GOAL_NOT_FOUND");
+    await requireProjectOwnerOf(ctx, goal.projectId, user._id);
+
+    const column = await ctx.db.get(args.columnId);
+    // 列必须属于该目标项所在的看板，防止跨板乱移。
+    if (!column || column.boardId !== goal.boardId) throw new Error("COLUMN_NOT_FOUND");
+    if (column._id === goal.columnId) return null;
+
+    const from = await ctx.db.get(goal.columnId);
+    await applyColumn(
+      ctx,
+      goal,
+      column,
+      user._id,
+      `「${goal.title}」从${from?.name ?? "未知列"}移到${column.name}`,
+    );
+    return null;
+  },
+});
 
 /** Creates a 目标项 in the product list. Goals carry no owner and no due date. */
 /** 客户价值估计 is an integer 1–10; anything else is treated as unset. */
@@ -337,10 +373,8 @@ export const planGoalToSprint = mutation({
           for (const link of mine) await ctx.db.delete(link._id);
           if (links.length === mine.length) await ctx.db.delete(task._id);
         }
-        await ctx.db.patch(goal._id, {
-          sprintId: undefined,
-          completedAt: undefined,
-        });
+        // 只解除迭代归属；`completedAt` 属于手工完成的结果，不动它。
+        await ctx.db.patch(goal._id, { sprintId: undefined });
         await logActivity(ctx, {
           projectId: goal.projectId,
           boardId: goal.boardId,
@@ -644,12 +678,6 @@ export const createTask = mutation({
       message: `新增任务项「${title}」`,
     });
 
-    // The new task may complete a goal that had none before.
-    for (const goalId of unique) {
-      const goal = await ctx.db.get(goalId);
-      if (goal) await syncGoalStatus(ctx, goal, user._id);
-    }
-
     return taskId;
   },
 });
@@ -669,7 +697,7 @@ export const setTaskStatus = mutation({
     estimatedHours: v.optional(v.number()),
     actualHours: v.optional(v.number()),
   },
-  returns: v.object({ goalsCompleted: v.array(v.id("goals")) }),
+  returns: v.null(),
   handler: async (ctx, args) => {
     const user = await requireUser(ctx, args.token);
     const task = await ctx.db.get(args.taskId);
@@ -709,20 +737,9 @@ export const setTaskStatus = mutation({
       message: `任务项「${task.title}」→ ${lane}`,
     });
 
-    // Every goal this task serves is re-evaluated; the last task finishing is
-    // what completes the goal.
-    const goalsCompleted: Id<"goals">[] = [];
-    for (const goalId of await goalIdsOfTask(ctx, task._id)) {
-      const goal = await ctx.db.get(goalId);
-      if (!goal) continue;
-      const wasDone = goal.completedAt !== undefined;
-      const { changed, columnName } = await syncGoalStatus(ctx, goal, user._id);
-      if (changed && columnName === "已完成" && !wasDone) {
-        goalsCompleted.push(goalId);
-      }
-    }
-
-    return { goalsCompleted };
+    // 任务状态不再影响目标项的列（完成与否由人决定，见 moveGoal）；
+    // 迭代燃尽图是「剩余工时」，上面已经重画过。
+    return null;
   },
 });
 
@@ -778,7 +795,6 @@ export const deleteTask = mutation({
     if (!task) throw new Error("TASK_NOT_FOUND");
     await requireBoardMember(ctx, task.boardId, user._id);
 
-    const goalIds = await goalIdsOfTask(ctx, task._id);
     const links = await ctx.db
       .query("goalTasks")
       .withIndex("by_task", (q) => q.eq("taskId", task._id))
@@ -791,11 +807,8 @@ export const deleteTask = mutation({
     );
     for (let i = 0; i < rest.length; i++) await ctx.db.patch(rest[i]!._id, { position: i });
 
-    // Removing a finished task can un-complete its goal.
-    for (const goalId of goalIds) {
-      const goal = await ctx.db.get(goalId);
-      if (goal) await syncGoalStatus(ctx, goal, user._id);
-    }
+    // 删掉带工时的任务会改变「剩余工时」，重画该迭代的燃尽图。
+    await recordSprintBurndown(ctx, task.projectId, task.boardId);
     return null;
   },
 });

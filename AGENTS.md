@@ -35,7 +35,7 @@
 | 迭代列表 | `boards.kind === "sprint"` | 一个 Sprint，可多个 |
 | 目标项 | `goals` | 团队共同承诺。**无负责人、无截止日期** |
 | 任务项 | `tasks` | 可执行单元，**有负责人、有截止日期、记录工时** |
-| 待处理 / 处理中 / 已完成 | goal 列名（固定三列） | 由任务状态**派生**，不可拖拽修改 |
+| 待处理 / 处理中 / 已完成 | goal 列名（固定三列） | **由人手工移动**（owner）；只有「排入迭代 ⇒ 处理中」是自动的 |
 | 提议 / 执行中 / 已完成 | `tasks.status` = `proposed`/`in_progress`/`done` | 迭代看板三条固定泳道 |
 | 卡片类型 / 标签 | `labels` | 同一张表两种 scope：`system` 预设 / `project` 项目自有 |
 | 客户价值估计 | `goals.value` (1–10) | 发布燃尽图纵轴 |
@@ -127,6 +127,7 @@ convex/                  后端（Convex 函数 + 数据模型）
   labels.ts              看板级卡片类型 CRUD
   templates.ts           系统级预设 CRUD（仅管理员）
   attachments.ts         检查列表 + 附件（含上传 URL）
+  activity.ts            活动日志的读取（listActivity / listGoalActivity，按时间倒序）
   progress.ts            项目进度 + 两种燃尽图查询
   lib/                   纯函数与服务端共享逻辑（无 React、无客户端依赖）
     auth.ts              鉴权守卫（见 §6）
@@ -148,6 +149,7 @@ src/
     ProjectPage.tsx      808 行 —— 单项目：看板列表、成员、进度、燃尽图
     ProjectsPage.tsx     493 行 —— 项目列表、创建、邀请码加入
     ui.tsx               共享 UI 原语（Modal/Drawer/Toast/ConfirmButton…）
+    ActivityFeed.tsx     活动日志列表（项目页与目标项抽屉共用）
     types.ts             客户端手写的 Convex 返回类型（保留 Id<> 品牌）
     lib/ui.ts → src/lib/ui.ts   ERROR_MESSAGES + describeError + 格式化
     AuthPage / AccountPage / AdminPage / PresetPage
@@ -168,7 +170,7 @@ snapshots/               数据快照（已 gitignore）
 | --- | --- | --- |
 | `users` | 账号。`role: admin\|member`，`status: active\|suspended` | `by_email`, `by_role` |
 | `sessions` | 自建会话票据，TTL **30 天** | `by_token`, `by_user` |
-| `projects` | 项目。`key` = 6 位邀请码，`sprintLengthDays`（默认 14） | `by_owner`, `by_key` |
+| `projects` | 项目。`key` = 6 位邀请码，`sprintLengthDays`（默认 **5** = 一个工作周） | `by_owner`, `by_key` |
 | `projectMembers` | 成员关系。`role: owner\|member` —— **写权限的唯一依据** | `by_project`, `by_user`, `by_project_user` |
 | `joinRequests` | 申请加入 / 邮件邀请，统一为一条记录 | `by_project_status`, `by_user_status`, `by_project_user` |
 | `boards` | 看板。`kind: backlog\|sprint`，sprint 带日期/编号/goal | `by_project`, `by_project_kind` |
@@ -190,7 +192,7 @@ snapshots/               数据快照（已 gitignore）
 
 ### 目标项 vs 任务项（最核心的划分）
 
-- **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；它的状态列完全由任务派生。
+- **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；所在列由 owner **手工移动**（见下一节）。
 - **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
 - 一个任务可以服务多个目标项（`goalTasks` 多对多）。
 - **卡片不填描述**：目标项与任务项都只以名称表达。UI 里没有任何描述输入框，
@@ -207,20 +209,24 @@ snapshots/               数据快照（已 gitignore）
 - 卡片上的类别**只以颜色小方框呈现**（`LabelSquare` / `.label-square`），**没设类别就不显示方块**；
   类别名通过方块的 `title` 提示与详情面板可见。
 
-### 目标项状态派生（`goals.ts: syncGoalStatus` / `isGoalComplete`）
+### 目标项所在列：手工为主，只保留一条派生（2026-10-13 改）
 
 ```
-已完成  ⇐ 至少 1 个任务 且 全部任务 done
-处理中  ⇐ 未全部完成，但 sprintId 有值（已排入迭代）
-待处理  ⇐ 未排入迭代
+已完成  ⇐ 只能由人手工移入（owner 在成果看板上移动）
+处理中  ⇐ 已排入至少一个迭代（唯一的自动转移）
+待处理  ⇐ 没有排入任何迭代
 ```
 
-- **空任务集不算完成**（否则新建目标项会立刻"已完成"）。这是刻意的，不要"修复"。
-- **手工新增只能落在「待处理」**：服务端 `createGoal` 拒绝把新目标项建到 处理中 / 已完成
+- ⚠️ **任务全部完成不再自动把目标项改成「已完成」。** 有些项目只想跟踪目标项本身、
+  根本不建任务，所以完成与否**由项目 owner 手工决定**（`goals.ts: moveGoal`）。
+  想恢复"任务驱动"的自动化前先想清楚：这会让"只跟踪目标项"的项目永远无法完成。
+- **「已完成」是粘性的**：`syncGoalStatus` 发现目标项已在终态列就直接返回，
+  排入迭代不会把它拉回「处理中」。
+- 手工移动**只有项目 owner 可以**（`requireProjectOwnerOf`）；每次移动都写一条 `goal_moved`
+  活动日志，并维护 `completedAt`（进终态列时写入、离开时清空 —— 进度与发布燃尽图都读它）。
+- **手工新增仍然只能落在「待处理」**：服务端 `createGoal` 拒绝把新目标项建到 处理中 / 已完成
   （`NEW_GOAL_MUST_BE_PENDING`），客户端也只在「待处理」列渲染新增框。
-  否则会写进一个与派生规则立刻矛盾的列状态（处理中却没有 `sprintId`）。
-- 状态列只在服务端派生写入，客户端**不允许**把目标项拖到别的列。
-- 任何影响任务的改动后都会重算目标项状态并刷新燃尽图。
+- 任务改动**不再触碰**目标项的列；但迭代燃尽图是「剩余工时」，任务变动后仍会重画。
 
 ### 任务状态流转（`goals.ts: setTaskStatus`）
 
@@ -232,15 +238,19 @@ snapshots/               数据快照（已 gitignore）
 
 - 客户端强制**逐级推进**：不能 `proposed → done` 一步到位；`done` 可「撤回」。
 - 进入 `in_progress` 时客户端弹窗强制要求预计工时，进入 `done` 时强制要求耗费工时（>0）。
-- 返回 `{ goalsCompleted }`，供 UI 提示。
+- 返回 `null`（曾经返回 `{ goalsCompleted }` 供 UI 提示；不再自动完成目标项后没有意义了）。
 
 ### 迭代（Sprint）
 
 - 每个项目**恰好一个**未归档 backlog（重复创建 → `BACKLOG_ALREADY_EXISTS`）；`createProject` 会自动建 backlog 及三列。
 - 产品列表三列固定为 待处理 / 处理中 / 已完成；迭代看板**没有自己的列**，三条泳道由 `tasks.status` 派生。
 - `sprintStatus` 由日期推导：开始日当天仍为 未开始，次日起 进行中，结束日之后 已结束。
-- 默认周期 14 天（`DEFAULT_SPRINT_DAYS`）；`projects.sprintLengthDays` 校验 1–90，**只影响之后新建的迭代**。
-- `endDate` 可省略，服务端按 `startDate + sprintLengthDays * DAY_MS` 补全；`endDate <= startDate` → `INVALID_SPRINT_RANGE`。
+- **默认周期是一个工作周**：`DEFAULT_SPRINT_DAYS` = **5**（周一开工、周五收尾，最后一天留作缓冲）。
+  `projects.sprintLengthDays` 校验 1–90，**只影响之后新建的迭代**。
+- **结束日 = 开始日 + (周期 − 1) 天**，两端都算在内（周期 5 → 周一…周五）。`endDate` 省略时服务端按此补全；
+  `endDate <= startDate` → `INVALID_SPRINT_RANGE`。
+- 新建迭代弹窗里**开始与结束日期都有默认值、都可以改**（`defaultSprintDates()`，开始默认下一个周一），
+  方便把缓冲时间留出来应付突发情况与常规会议。
 - **排入迭代（`planGoalToSprint`）只允许 未开始 的迭代** —— 迭代一旦开始，范围冻结（`SPRINT_NOT_PLANNED`）。
 - **移出迭代**（`sprintId: undefined`）会连带删除该目标项的任务：任务属于迭代，会变孤儿；
   但**检查项与附件跟随目标项，保留不动**。
@@ -337,12 +347,14 @@ snapshots/               数据快照（已 gitignore）
   `listMyJoinRequests` `removeMember` `updateProject` `deleteProject`
 - **boards.ts**：`listBoards` `getBoard` `createBoard` `updateBoard`（另导出内部 `createBoardRecord`）
 - **goals.ts**：`createGoal` `updateGoal` `deleteGoal` `reorderGoal` `planGoalToSprint`
+  `moveGoal`（owner 手工移动列，记日志）
   `effortStats` `listTasks` `createTask` `setTaskStatus` `updateTask` `deleteTask`
-  （导出内部复用：`tasksOfGoal` `isGoalComplete` `syncGoalStatus` `customerValue` `tasksOfSprint` `goalIdsOfTask`）
+  （导出内部复用：`tasksOfGoal` `syncGoalStatus` `applyColumn` `customerValue` `tasksOfSprint` `goalIdsOfTask`）
 - **labels.ts**：`listLabels` `createLabel` `updateLabel` `deleteLabel` `moveLabel`
 - **templates.ts**：`listTemplates` `createTemplate` `updateTemplate` `deleteTemplate`
 - **attachments.ts**：`listChecks` `addCheck` `toggleCheck` `updateCheck` `deleteCheck`
   `generateUploadUrl` `createAttachment` `listAttachments` `deleteAttachment`
+- **activity.ts**：`listActivity`（项目全部事件）`listGoalActivity`（单个目标项）—— 两者都**按时间倒序**返回
 - **progress.ts**：`getProjectProgress` `getSprintBurndown` `getReleaseBurndown` `snapshotBurndown`（另 re-export `columnsOfBoard`）
 
 - 两个契约细节（改之前先读 §5）：
@@ -404,7 +416,12 @@ snapshots/               数据快照（已 gitignore）
   `GoalDrawer` 的字段是：标题 / 类别 / 客户价值估计 / 检查列表 / 附件 —— **没有描述**
   （见 §5 的「卡片不填描述」），**也没有任务进展统计**（不显示 N/M 个任务已完成、不带进度条；
   目标的完成度看卡片所在列即可）。
+- `ActivityFeed.tsx`：活动日志列表，`goalId` 给定时只看该目标项、只给 `projectId` 时列整个项目；
+  **两处都直接显示后端返回的顺序（最新在上）**，前端不排序。项目页与目标项抽屉都用它。
+- 手工移动目标项：`ProductList` 在 owner 视角下给每张卡片渲染一行「移到 待处理/处理中/已完成」
+  按钮（当前列禁用）。**不用拖拽**，因为全站没有拖拽实现；按钮更明确也更好点。
 - `ProjectPage.tsx`：看板列表（栏目名 **项目看板**）、成员与加入申请、发布燃尽图、进度卡、项目/看板设置弹窗。
+  新建迭代时开始/结束日期都有默认值（下一个周一 + 周期 − 1 天），并**都可以手工改**。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
 - `AuthPage.tsx`：登录/注册 + **「后端数据」切换器**（`环境` 只在这里能改）。
@@ -538,6 +555,14 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   这是产品环境可用性的前提，不是可选优化。
 - `convex/progress.ts` 的 `effortStats` 与 `listTasks` 的 **returns 校验器**里 `labelId` 仍是 `v.optional` —— 这是对的
   （历史数据可能无类别），不要跟着 args 一起收紧。
+
+**尚未实现（用户已提出，设计已定）**
+
+- **一个目标项只能属于一个迭代**（`goals.sprintId` 是单值）。用户要的是「一个目标项可以出现在多个
+  迭代里，首次排入的那个迭代拥有它的价值，之后只占工作时间」。已确定的做法：新增 `goalSprints`
+  多对多表（含 `countsForValue` 布尔，首个为 true、可在界面手改），删掉 `goals.sprintId`，
+  并把 ~25 处 `goal.sprintId === board._id` 的成员判断改成查关联表。
+  **注意这是结构变更，要走 §12 流程**（且删 `sprintId` 要按 §12「删字段分三次推送」来做）。
 
 **前端**
 

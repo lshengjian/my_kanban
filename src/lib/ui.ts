@@ -67,6 +67,31 @@ export function formatTime(ts: number): string {
   });
 }
 
+/** 下一个周一（今天就是周一时返回今天），本地零点。迭代默认从周一开始。 */
+export function nextMonday(from = new Date()): Date {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  d.setDate(d.getDate() + ((1 - d.getDay() + 7) % 7));
+  return d;
+}
+
+/** `Date` → `<input type="date">` 要的 "YYYY-MM-DD"（按本地时区，不走 UTC）。 */
+export function toDateInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * 迭代的默认起止日期：**周一开始**，结束 = 开始 + (周期 - 1) 天。
+ * 周期 5 天即「周一开工、周五收尾」，最后一天留作缓冲。
+ * 两个日期在界面上都可以手工改。
+ */
+export function defaultSprintDates(sprintDays: number): { start: string; end: string } {
+  const start = nextMonday();
+  const end = new Date(start);
+  end.setDate(end.getDate() + Math.max(1, sprintDays) - 1);
+  return { start: toDateInput(start), end: toDateInput(end) };
+}
+
 export function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString("zh-CN", {
     year: "numeric",

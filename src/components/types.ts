@@ -147,6 +147,17 @@ export type ActivityEntry = {
   createdAt: number;
 };
 
+/** 活动日志条目（`activity.listActivity` / `listGoalActivity` 的返回）。 */
+export type ActivityItem = {
+  _id: Id<"activityLog">;
+  type: string;
+  message: string;
+  createdAt: number;
+  actorName: string;
+  goalId?: Id<"goals">;
+  taskId?: Id<"tasks">;
+};
+
 /** 检查列表 entry on a 目标项. */
 export type CheckItem = {
   _id: Id<"checklistItems">;

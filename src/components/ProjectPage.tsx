@@ -11,11 +11,18 @@ import {
   ProgressBar,
   useToast,
 } from "./ui";
-import { describeError, formatDate, sprintStatusMeta } from "../lib/ui";
+import {
+  defaultSprintDates,
+  describeError,
+  formatDate,
+  sprintStatusMeta,
+} from "../lib/ui";
+import { ActivityFeed } from "./ActivityFeed";
 import {
   BOARD_KINDS,
   BOARD_KIND_META,
   DEFAULT_LABELS,
+  DEFAULT_SPRINT_DAYS,
 } from "../../convex/lib/constants";
 import type { BoardKind } from "../../convex/lib/constants";
 
@@ -53,6 +60,7 @@ export default function ProjectPage({
   const [boardKind, setBoardKind] = useState<BoardKind>("sprint");
   const [boardDesc, setBoardDesc] = useState("");
   const [sprintStart, setSprintStart] = useState("");
+  const [sprintEnd, setSprintEnd] = useState("");
   const [sprintGoal, setSprintGoal] = useState("");
   const [settingsFor, setSettingsFor] = useState<{
     _id: Id<"boards">;
@@ -85,6 +93,18 @@ export default function ProjectPage({
     sprint: templates?.sprint?.map((l) => ({ name: l.name, color: l.color })) ?? [],
   };
 
+  /**
+   * 新建迭代：日期默认「下一个周一 → 开始 + (周期 - 1) 天」（周期 5 即周五收尾），
+   * 两个日期都能手工改，用来吸收突发情况或常规会议。
+   */
+  const openNewBoard = () => {
+    const days = project.sprintLengthDays ?? DEFAULT_SPRINT_DAYS;
+    const { start, end } = defaultSprintDates(days);
+    setSprintStart(start);
+    setSprintEnd(end);
+    setShowBoard(true);
+  };
+
   const submitBoard = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -99,11 +119,16 @@ export default function ProjectPage({
           boardKind === "sprint" && sprintStart
             ? new Date(sprintStart + "T00:00:00").getTime()
             : undefined,
+        endDate:
+          boardKind === "sprint" && sprintEnd
+            ? new Date(sprintEnd + "T00:00:00").getTime()
+            : undefined,
       });
       setShowBoard(false);
       setBoardName("");
       setBoardDesc("");
       setSprintStart("");
+      setSprintEnd("");
       setSprintGoal("");
       toast.push("看板已创建（含三列默认布局）");
       onOpenBoard(boardId);
@@ -155,7 +180,7 @@ export default function ProjectPage({
           </h1>
           <p>
             {project.description ? `${project.description} · ` : ""}
-            迭代周期 {project.sprintLengthDays ?? 14} 天
+            迭代周期 {project.sprintLengthDays ?? DEFAULT_SPRINT_DAYS} 天
           </p>
         </div>
         <button className="btn" onClick={() => setShowInvite(true)}>
@@ -171,7 +196,7 @@ export default function ProjectPage({
           {showRelease ? "▾ 收起燃尽图" : "📉 燃尽图"}
         </button>
         {canManage && (
-          <button className="btn btn-primary" onClick={() => setShowBoard(true)}>
+          <button className="btn btn-primary" onClick={openNewBoard}>
             ＋ 新建迭代
           </button>
         )}
@@ -193,6 +218,16 @@ export default function ProjectPage({
           />
         </div>
       )}
+
+      {/* 活动日志 —— 后端按时间倒序返回，最新在上 */}
+      <div className="card" style={{ padding: 18, marginBottom: 22 }}>
+        <div className="row" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 15 }}>活动日志</h3>
+          <div className="spacer" />
+          <span className="faint" style={{ fontSize: 12 }}>最新在上</span>
+        </div>
+        <ActivityFeed token={token} projectId={projectId} />
+      </div>
 
       <div className="grid-cards" style={{ marginBottom: 22 }}>
         {/* 进度按「完成目标项 / 总目标项」汇报 */}
@@ -536,16 +571,29 @@ export default function ProjectPage({
                 />
               </div>
               <div className="field">
-                <label htmlFor="sgoal">迭代目标</label>
+                <label htmlFor="send">结束日期</label>
                 <input
-                  id="sgoal"
+                  id="send"
+                  type="date"
                   className="input"
-                  value={sprintGoal}
-                  onChange={(e) => setSprintGoal(e.target.value)}
-                  placeholder="本迭代要达成什么"
-                  maxLength={200}
+                  value={sprintEnd}
+                  onChange={(e) => setSprintEnd(e.target.value)}
                 />
               </div>
+            </div>
+            <p className="hint" style={{ marginTop: -6 }}>
+              默认「周一开工、周五收尾」，最后一天留作缓冲；两个日期都可以改。
+            </p>
+            <div className="field">
+              <label htmlFor="sgoal">迭代目标</label>
+              <input
+                id="sgoal"
+                className="input"
+                value={sprintGoal}
+                onChange={(e) => setSprintGoal(e.target.value)}
+                placeholder="本迭代要达成什么"
+                maxLength={200}
+              />
             </div>
             <div className="field">
               <label htmlFor="bdesc">描述（可选）</label>

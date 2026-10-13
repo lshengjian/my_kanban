@@ -447,7 +447,12 @@ async function createBoardRecord(
     description: "",
     sprintNumber: number,
     startDate: kind === "sprint" ? start : undefined,
-    endDate: kind === "sprint" ? (args.endDate ?? start + sprintDays * DAY_MS) : undefined,
+    // 结束日 = 开始日 + (周期 - 1) 天，两端都算在内：
+    // 周期 5 天即「周一开始、周五结束」，最后一天自然是机动缓冲。
+    endDate:
+      kind === "sprint"
+        ? (args.endDate ?? start + (Math.max(1, sprintDays) - 1) * DAY_MS)
+        : undefined,
     sprintStatus: kind === "sprint" ? (args.sprintStatus ?? "planned") : undefined,
     goal: args.goal,
     createdBy: args.userId,

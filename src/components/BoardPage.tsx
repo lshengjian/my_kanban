@@ -8,6 +8,7 @@ import { Drawer, Modal, ProgressBar, useToast } from "./ui";
 import BurndownChart from "./BurndownChart";
 import LabelManager from "./LabelManager";
 import { describeError, formatDate } from "../lib/ui";
+import { ActivityFeed } from "./ActivityFeed";
 
 type Props = {
   token: string;
@@ -59,16 +60,20 @@ function ProductList({
   data,
   token,
   canAddGoals,
+  canMoveGoals,
   onOpenGoal,
 }: {
   data: BoardData;
   token: string;
   /** Only the project owner authors the product list. */
   canAddGoals: boolean;
+  /** Only the project owner moves 目标项 between columns. */
+  canMoveGoals: boolean;
   onOpenGoal: (goal: Goal) => void;
 }) {
   const createGoal = useMutation(api.goals.createGoal);
   const reorder = useMutation(api.goals.reorderGoal);
+  const moveGoal = useMutation(api.goals.moveGoal);
   const plan = useMutation(api.goals.planGoalToSprint);
   const boards = useQuery(
     api.boards.listBoards,
@@ -178,6 +183,33 @@ function ProductList({
                       >
                         移出迭代
                       </button>
+                    </div>
+                  )}
+
+                  {/* 目标项与任务解耦：简单的项目可以完全不管任务，由 owner 直接
+                      把卡片移到目标列。每次移动都会写进活动日志（见 goal_moved）。 */}
+                  {canMoveGoals && (
+                    <div className="card-actions">
+                      <span className="muted" style={{ fontSize: 11.5 }}>
+                        移到
+                      </span>
+                      {data.columns.map((target) => (
+                        <button
+                          key={target._id}
+                          className="btn btn-sm"
+                          disabled={target._id === column._id}
+                          title={
+                            target._id === column._id
+                              ? `已在「${target.name}」`
+                              : `移到「${target.name}」`
+                          }
+                          onClick={() =>
+                            moveGoal({ token, goalId: goal._id, columnId: target._id })
+                          }
+                        >
+                          {target.name}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </article>
@@ -1113,6 +1145,7 @@ export default function BoardPage({
           data={data}
           token={token}
           canAddGoals={isProjectOwner}
+          canMoveGoals={isProjectOwner}
           onOpenGoal={setOpenGoal}
         />
       ) : (
@@ -1268,6 +1301,11 @@ function GoalDrawer({
           </span>
         </div>
         {error && <div className="error-text">{error}</div>}
+
+        <div className="field">
+          <label>变更历史</label>
+          <ActivityFeed token={token} goalId={goal._id} emptyHint="这个目标项还没有变更记录" />
+        </div>
 
         <CheckListSection token={token} goal={goal} />
         <AttachmentSection token={token} goal={goal} />

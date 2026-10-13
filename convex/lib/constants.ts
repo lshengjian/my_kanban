@@ -4,7 +4,11 @@
 export const DAY_MS = 86_400_000;
 
 /** A 迭代 runs two weeks unless the project says otherwise. */
-export const DEFAULT_SPRINT_DAYS = 14;
+/**
+ * 默认迭代长度（天）。默认按「一个工作周」：周一开工、周五收尾 ——
+ * 最后一天留作缓冲，应付突发情况与常规会议。项目可用 `sprintLengthDays` 覆盖。
+ */
+export const DEFAULT_SPRINT_DAYS = 5;
 
 export const BOARD_KINDS = ["backlog", "sprint"] as const;
 export type BoardKind = (typeof BOARD_KINDS)[number];
