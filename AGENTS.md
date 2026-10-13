@@ -301,6 +301,16 @@ snapshots/               数据快照（已 gitignore）
   实测：带 `Origin` 的 GET 会返回 `Access-Control-Allow-Origin`，所以 `fetch` 可用。
 - `ctx.storage.delete` 是 best-effort（存储非事务），失败只留下孤儿 blob，不报错。
 
+### 日期一律按「天」比较（2026-10-13 立的规矩）
+
+- **凡是判断"今天/逾期/未开始"这类语义，先归一化到当天零点再比** —— 用
+  `constants.ts` 导出的 `startOfDay()`（前后端共用同一份），或前端 `src/lib/ui.ts` 的
+  `isOverdue()`。**不要**拿存着 00:00 的日期字段直接和 `Date.now()` 比。
+- 为什么：`<input type="date">` 存的是"哪一天"，落库就是当天 00:00。直接比时间戳会让
+  **今天到期**的任务从当天零点起就被标成「逾期」；这类误报在界面上非常刺眼。
+- 已有的正确先例：`deriveSprintStatus` —— 开始日当天仍算"未开始"、结束日当天仍算"进行中"，
+  就是靠 `startOfDay` 做到的。改动这两个函数的比较方式前先想清楚这条。
+
 ### 其他约束速查
 
 - 标题上限 160（目标项/任务项）、看板名与项目名上限 80、**看板自有标签名 20**（`labels.ts`）、
@@ -601,13 +611,16 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   2026-10-13 已修（改为 `listAttachments` 直接返回 `url`）并删除该函数。
   **教训：不要拿 `useQuery`/`useMutation` 当命令式 API，也不要靠 `as unknown as` 掩盖类型不符。**
 - 多处 mutation 缺 try/catch → 未处理的 rejection：`BoardPage` 的排序按钮、移出迭代、检查项 toggle/remove。
-- `overdue` 在渲染时用 `Date.now()` 计算 → 页面常开不会自动翻转。
+- `overdue` 现在按天判断（`isOverdue`，完成日当天不算逾期，2026-10-13 修），但仍是在**渲染时**
+  取值 → 页面开着跨过零点不会自动翻转，要等下一次重渲染。加定时器或改成订阅前先确认值得。
 - `SprintHeader` 内 `board.kind === "sprint" ? … : "skip"` 恒真（该组件只在 sprint 下渲染）。
 - `BoardPage` 早退 `if (!data) return "加载中…"` → 加载与错误不区分。
 - `TaskCard` 有两段重复 JSDoc，第一段已过时；`hours()` 与 `hrs()` 是重复实现。
 - 直接展示了错误码字符串 `"INVALID_CUSTOMER_VALUE"` 而非走 `describeError`。
 - `ProjectsPage` 的 `listMyJoinRequests` 未加 `"skip"` 守卫（其余 query 都有）。
 - `listAllProjects` 返回的 `role` 是按 `ownerId` 推的，不代表调用者的真实成员关系。
+- 2026-10-13 删掉了 `src/lib/ui.ts` 的 `sprintDaysLeft()`：全仓无引用，而且它按时间戳算天数，
+  在结束日之后会返回负数（显示「剩余 -1 天」）—— 同属上面那条「日期要按天比」的毛病。
 
 ---
 

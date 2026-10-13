@@ -3,6 +3,7 @@
 import {
   BOARD_KIND_META,
   SPRINT_STATUS_META,
+  startOfDay,
 } from "../../convex/lib/constants";
 import type { BoardKind } from "../../convex/lib/constants";
 
@@ -47,14 +48,6 @@ export function sprintStatusMeta(
   return SPRINT_STATUS_META[status ?? "planned"];
 }
 
-/** Days remaining in a sprint; negative once it has overrun. */
-export function sprintDaysLeft(
-  endDate: number | undefined,
-): number | null {
-  if (!endDate) return null;
-  return Math.ceil((endDate - Date.now()) / 86_400_000);
-}
-
 export function formatTime(ts: number): string {
   const diff = Date.now() - ts;
   if (diff < 60_000) return "刚刚";
@@ -65,6 +58,17 @@ export function formatTime(ts: number): string {
     month: "2-digit",
     day: "2-digit",
   });
+}
+
+/**
+ * 任务是否逾期。
+ *
+ * ⚠️ **完成日当天不算逾期**，只有日期早于今天才算。
+ * `dueDate` 存的是当天 00:00（`<input type="date">` 的语义就是"哪一天"），
+ * 所以拿它直接和 `Date.now()` 比，会让**当天一过零点就立刻标红** —— 2026-10-13 修的就是这个。
+ */
+export function isOverdue(dueDate: number, now = Date.now()): boolean {
+  return startOfDay(dueDate) < startOfDay(now);
 }
 
 /** 下一个周一（今天就是周一时返回今天），本地零点。迭代默认从周一开始。 */

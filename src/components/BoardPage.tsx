@@ -7,7 +7,7 @@ import type { Attachment, BoardData, Goal, PublicUser, Task } from "./types";
 import { ConfirmButton, Drawer, Modal, ProgressBar, useToast } from "./ui";
 import BurndownChart from "./BurndownChart";
 import LabelManager from "./LabelManager";
-import { describeError, formatDate } from "../lib/ui";
+import { describeError, formatDate, isOverdue } from "../lib/ui";
 import { ActivityFeed } from "./ActivityFeed";
 
 type Props = {
@@ -477,7 +477,8 @@ function TaskCard({
   const toast = useToast();
   const meta = TASK_STATUS_META[task.status];
   const label = labels.find((l) => l._id === task.labelId);
-  const overdue = task.dueDate < Date.now() && task.status !== "done";
+  // 按「天」判断：完成日当天不算逾期，只有日期早于今天才算。
+  const overdue = task.status !== "done" && isOverdue(task.dueDate);
 
   return (
     <article className="card slim">

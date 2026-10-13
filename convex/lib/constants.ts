@@ -106,8 +106,14 @@ export const LABEL_PALETTE = [
   "#a855f7",
 ] as const;
 
-/** Local-midnight timestamp for a given instant. */
-function startOfDay(ts: number): number {
+/**
+ * Local-midnight timestamp for a given instant.
+ *
+ * **凡是「按天」的判断都要先归一到这里**，不要拿存着 00:00 的日期字段直接和
+ * `Date.now()` 比 —— 那会让"今天到期"从当天零点起就被当成过期
+ * （2026-10-13 修的逾期误报就是这个原因）。前后端共用这一份实现。
+ */
+export function startOfDay(ts: number): number {
   const d = new Date(ts);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
