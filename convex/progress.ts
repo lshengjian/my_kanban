@@ -1,6 +1,5 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
 import { requireBoardMember, requireProjectMember, requireUser } from "./lib/auth";
 import { columnsOfBoard } from "./lib/board";
 import {
@@ -27,17 +26,6 @@ export const getProjectProgress = query({
   args: { token: v.optional(v.string()), projectId: v.id("projects") },
   returns: v.object({
     project: countsValidator.extend({ percent: v.number() }),
-    boards: v.array(
-      v.object({
-        boardId: v.id("boards"),
-        name: v.string(),
-        kind: v.string(),
-        total: v.number(),
-        completed: v.number(),
-        remaining: v.number(),
-        percent: v.number(),
-      }),
-    ),
     tasks: v.object({
       total: v.number(),
       done: v.number(),
@@ -49,13 +37,6 @@ export const getProjectProgress = query({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx, args.token);
     await requireProjectMember(ctx, args.projectId, user._id);
-
-    const boards = (
-      await ctx.db
-        .query("boards")
-        .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-        .collect()
-    ).filter((b) => !b.archived);
 
     const allGoals = await ctx.db
       .query("goals")
@@ -72,27 +53,8 @@ export const getProjectProgress = query({
     const doneSet = new Set(
       allGoals.filter((g) => g.completedAt !== undefined).map((g) => g._id as string),
     );
-    const isDone = (id: Id<"goals">) => doneSet.has(id as string);
-
     const total = allGoals.length;
     const completed = doneSet.size;
-
-    const rows = boards.map((board) => {
-      const scoped =
-        board.kind === "sprint"
-          ? allGoals.filter((g) => g.sprintId === board._id)
-          : allGoals.filter((g) => g.boardId === board._id);
-      const done = scoped.filter((g) => isDone(g._id)).length;
-      return {
-        boardId: board._id,
-        name: board.name,
-        kind: board.kind,
-        total: scoped.length,
-        completed: done,
-        remaining: scoped.length - done,
-        percent: scoped.length === 0 ? 0 : Math.round((done / scoped.length) * 100),
-      };
-    });
 
     return {
       project: {
@@ -101,7 +63,6 @@ export const getProjectProgress = query({
         remaining: total - completed,
         percent: total === 0 ? 0 : Math.round((completed / total) * 100),
       },
-      boards: rows,
       tasks: {
         total: allTasks.length,
         done: allTasks.filter((t) => t.status === "done").length,

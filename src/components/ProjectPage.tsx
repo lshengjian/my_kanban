@@ -219,16 +219,6 @@ export default function ProjectPage({
         </div>
       )}
 
-      {/* 活动日志 —— 后端按时间倒序返回，最新在上 */}
-      <div className="card" style={{ padding: 18, marginBottom: 22 }}>
-        <div className="row" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>活动日志</h3>
-          <div className="spacer" />
-          <span className="faint" style={{ fontSize: 12 }}>最新在上</span>
-        </div>
-        <ActivityFeed token={token} projectId={projectId} />
-      </div>
-
       <div className="grid-cards" style={{ marginBottom: 22 }}>
         {/* 进度按「完成目标项 / 总目标项」汇报 */}
         <div className="card" style={{ padding: 18 }}>
@@ -256,22 +246,6 @@ export default function ProjectPage({
             )}
           </div>
 
-          {progress && progress.boards.length > 0 && (
-            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-              {progress.boards.map((b) => (
-                <div key={b.boardId}>
-                  <div className="row" style={{ fontSize: 12.5, marginBottom: 4 }}>
-                    <span className="muted">{b.name}</span>
-                    <div className="spacer" />
-                    <span className="faint" style={{ fontVariantNumeric: "tabular-nums" }}>
-                      {b.completed}/{b.total} · {b.percent}%
-                    </span>
-                  </div>
-                  <ProgressBar percent={b.percent} />
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
@@ -501,11 +475,21 @@ export default function ProjectPage({
         </table></div>
       </div>
 
+      {/* 活动日志 —— 后端按时间倒序返回，最新在上 */}
+      <div className="card" style={{ padding: 18, marginBottom: 22 }}>
+        <div className="row" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 15 }}>活动日志</h3>
+          <div className="spacer" />
+          <span className="faint" style={{ fontSize: 12 }}>最新在上</span>
+        </div>
+        <ActivityFeed token={token} projectId={projectId} />
+      </div>
+
       {/* Modals */}
       {showBoard && (
         <Modal
           title="新建迭代"
-          subtitle="默认 2 周一个周期，可随时调整起止日期。"
+          subtitle="默认「周一开工、周五收尾」，起止日期都可调整。"
           onClose={() => setShowBoard(false)}
         >
           <form className="form-row" onSubmit={submitBoard}>
