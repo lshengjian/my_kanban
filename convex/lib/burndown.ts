@@ -27,9 +27,9 @@ export type ReleasePoint = {
 };
 
 /**
- * 冲刺燃尽图 — y axis.
+ * 迭代燃尽图 — y axis.
  *
- * The remaining effort in one sprint's SBL: every task that is not 已完成
+ * The remaining effort in one sprint: every task that is not 已完成
  * still owes its estimate. Note that 预计工时 is entered when a task starts,
  * so a task nobody has picked up yet contributes nothing until it does.
  */

@@ -270,7 +270,7 @@ export default defineSchema({
   // `scope` says which reading applies:
   //
   //   sprint  — x = calendar day inside one 迭代,
-  //             y = 剩余工时 of that sprint's SBL tasks.
+  //             y = 本期任务剩余工时 of that sprint's tasks.
   //   release — x = 迭代,
   //             y = 成果的价值估计 of the goals not yet completed.
   //

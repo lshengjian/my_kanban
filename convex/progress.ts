@@ -75,7 +75,7 @@ export const getProjectProgress = query({
 });
 
 /**
- * 冲刺燃尽图 — x = 冲刺内的天数, y = SBL 剩余工时.
+ * 迭代燃尽图 — x = 迭代内的天数, y = 本期任务剩余工时.
  *
  * The straight `ideal` line runs from the sprint's opening hours to zero; the
  * `remaining` line is what the team actually had left on each recorded day.

@@ -984,7 +984,7 @@ function SprintHeader({
   token: string;
   boardId: Id<"boards">;
 }) {
-  // x = 冲刺内的天数, y = SBL 剩余工时.
+  // x = 迭代内的天数, y = 本期任务剩余工时.
   const burndown = useQuery(
     api.progress.getSprintBurndown,
     board.kind === "sprint" ? { token, boardId } : "skip",
@@ -1021,7 +1021,7 @@ function SprintHeader({
             labels={(burndown?.points ?? []).map((p) => p.date.slice(5))}
             remaining={(burndown?.points ?? []).map((p) => p.remaining)}
             ideal={(burndown?.points ?? []).map((p) => p.ideal)}
-            unitLabel="SBL 剩余工时（小时）"
+            unitLabel="本期任务剩余工时（小时）"
             emptyHint="本迭代还没有记录。任务开始执行时会自动开始绘制。"
           />
         </div>
