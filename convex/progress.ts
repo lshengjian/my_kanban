@@ -18,9 +18,11 @@ const countsValidator = v.object({
 /**
  * 项目进度 — always counted over 目标项, which is also what 燃尽图 plots.
  *
- * A goal is complete when it has at least one task and all of them are done, so
- * the counts are always derived from the task table rather than trusted from a
- * stored flag.
+ * A goal is 已完成 only when an owner moves it into the terminal column by hand
+ * (任务全部完成不再自动完成目标项), and `moveGoal` stamps `completedAt` at that
+ * moment — so the count is derived from that field rather than a task tally.
+ * The board page and project listings count the same thing off the column's
+ * `isDone` flag (convex/boards.ts `getBoard`, `listBoards`, projects.countCompleted).
  */
 export const getProjectProgress = query({
   args: { token: v.optional(v.string()), projectId: v.id("projects") },

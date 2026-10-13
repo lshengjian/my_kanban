@@ -39,6 +39,13 @@ export default function ProjectsPage({
 
   // Admins default to the org-wide list; members never leave their own.
   const effectiveScope = isAdmin ? scope : "mine";
+
+  // 系统级汇总（项目/看板/目标项）来自 adminStats，服务端只允许管理员读，
+  // 所以非管理员或在「我参与的」范围下一律 "skip"，不白查也不会报 FORBIDDEN。
+  const stats = useQuery(
+    api.auth.adminStats,
+    isAdmin && effectiveScope === "all" ? { token } : "skip",
+  );
   const source = effectiveScope === "all" ? all : mine;
   const projects = source?.items ?? [];
   const total = source?.total ?? 0;
@@ -53,10 +60,6 @@ export default function ProjectsPage({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
-  const deleteProject = useMutation(api.projects.deleteProject);
-  const [pendingDelete, setPendingDelete] = useState<{ _id: Id<"projects">; name: string } | null>(
-    null,
-  );
   const [showJoin, setShowJoin] = useState(false);
   const [key, setKey] = useState("");
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -96,8 +99,11 @@ export default function ProjectsPage({
 
   const pendingCount = (myRequests ?? []).length;
   const invited = new Set((invitations ?? []).map((i) => i.projectId as string));
+  // 「可加入的项目」＝我**不是**成员的项目。服务端用 role="guest" 表达这种身份
+  // （管理员是只读访客）；旧代码写的是 role !== "owner"，会把"我已是成员"的项目
+  // 也算进来（那种项目申请加入只会被拒）。
   const joinable = (all?.items ?? []).filter(
-    (p) => p.role !== "owner" && !invited.has(p._id as string),
+    (p) => p.role === "guest" && !invited.has(p._id as string),
   );
 
   return (
@@ -143,6 +149,32 @@ export default function ProjectsPage({
           ＋ 新建项目
         </button>
       </div>
+
+      {/* 全部项目页顶部一行汇总 —— 系统整体的项目 / 看板 / 目标项数量 */}
+      {effectiveScope === "all" && stats && (
+        <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
+          <div className="row" style={{ gap: 26, flexWrap: "wrap", fontSize: 13 }}>
+            {[
+              ["项目", stats.projects],
+              ["看板", stats.boards],
+              ["目标项", stats.goals],
+            ].map(([label, value]) => (
+              <span key={String(label)} className="muted">
+                {label}{" "}
+                <b
+                  style={{
+                    color: "var(--text)",
+                    fontSize: 16,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {String(value)}
+                </b>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {error && <div className="error-text" style={{ marginBottom: 16 }}>{error}</div>}
 
@@ -254,23 +286,12 @@ export default function ProjectsPage({
                 <div className="row">
                   <h3>{project.name}</h3>
                   <div className="spacer" />
+                  {/* 项目不可删除（2026-10-14 起）：删除会级联 12 张表，太危险，
+                      所以这里只留「拥有者」标识，没有删除入口。 */}
                   {project.role === "owner" && (
-                    <>
-                      <span className="badge" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
-                        拥有者
-                      </span>
-                      <button
-                        className="icon-btn"
-                        title="删除项目"
-                        aria-label={`删除项目 ${project.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingDelete(project);
-                        }}
-                      >
-                        🗑
-                      </button>
-                    </>
+                    <span className="badge" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+                      拥有者
+                    </span>
                   )}
                 </div>
                 <div className="row">
@@ -455,36 +476,6 @@ export default function ProjectsPage({
         <div className="faint" style={{ marginTop: 18, fontSize: 12 }}>
           最近一次申请：{formatTime(myRequests[0]!.createdAt)}
         </div>
-      )}
-      {pendingDelete && (
-        <Modal
-          title="删除项目"
-          subtitle={`「${pendingDelete.name}」及其所有目标项、任务项、附件都会被永久删除`}
-          onClose={() => setPendingDelete(null)}
-        >
-          <div className="form-row">
-            <div className="row" style={{ justifyContent: "flex-end" }}>
-              <button className="btn" onClick={() => setPendingDelete(null)}>
-                取消
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={async () => {
-                  const target = pendingDelete;
-                  setPendingDelete(null);
-                  try {
-                    await deleteProject({ token, projectId: target._id });
-                    toast.push("项目已删除");
-                  } catch (err) {
-                    toast.push(describeError(err));
-                  }
-                }}
-              >
-                确认删除
-              </button>
-            </div>
-          </div>
-        </Modal>
       )}
 
       {toast.node}

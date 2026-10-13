@@ -278,6 +278,13 @@ snapshots/               数据快照（已 gitignore）
 ### 进度与燃尽图（`progress.ts`, `lib/burndown.ts`）
 
 - 项目进度**只按目标项计数**（不是任务项）。`percent = round(completed / total * 100)`，分母为 0 时为 0。
+- 「已完成」的判定口径**全站必须一致**：目标项落在终态列（`columns.isDone === true`，`moveGoal` 进列时
+  同时写 `completedAt`）才算完成 —— 看板页头部（`boards.getBoard` 的 `counts.goalsDone`）、
+  迭代标签页角标与项目页看板列表（`boards.listBoards`）、项目卡（`projects.countCompleted`）、
+  项目进度卡（`progress.getProjectProgress` 读 `completedAt`）都由此推导。
+  ⚠️ 2026-10-14 修：`getBoard` 先算出 `goalsDone`、返回时又被 `{ ...counts, goalsDone: 0 }` 覆盖成 0，
+  于是预期成果看板头部永远显示「N 个目标项 · **0 已完成**」而进度条恒为 0。改动 `getBoard` 的返回时
+  不要再往 `counts` 上加覆盖字段。
 - 燃尽图表一表两用，靠 `scope` 区分：
   - `sprint`：x = 迭代内日期（`"YYYY-MM-DD"`），y = **本期任务剩余工时**（未完成任务的
     `estimatedHours` 之和；UI 纵轴文案即此）。注意：预计工时在「开始执行」时才录入，
@@ -314,6 +321,11 @@ snapshots/               数据快照（已 gitignore）
 
 ### 其他约束速查
 
+- ⛔ **项目不可删除**（2026-10-14 起）：删除项目会级联 12 张表，太容易误伤 —— 前端**没有任何**
+  删除项目的入口，`projects.deleteProject` 也对**所有**调用者（管理员、项目 owner 一律在内）
+  恒抛 `PROJECT_DELETE_DISABLED`。真需要按 id 清理某个项目时，只走内部
+  `internal.projects.purgeProject`（`internalMutation`，客户端不可达，只能 CLI 执行；
+  见 §6 与《维护手册》6.4）。
 - 标题上限 160（目标项/任务项）、看板名与项目名上限 80、**看板自有标签名 20**（`labels.ts`）、
   **系统级预设名 24**（`templates.ts`）、检查项文本 300。两者不同，别混。
 - 密码最小长度 `MIN_PASSWORD_LENGTH`（前端提示「至少 6 位」）；注册邮箱走正则校验并 `trim()+toLowerCase()` 归一化。
@@ -345,6 +357,17 @@ snapshots/               数据快照（已 gitignore）
 管理员可以查看任何项目，但**写操作以项目成员身份为准**，所以管理员不会悄悄改别人的看板。
 反之，`requireProjectOwnerOf` 才是"只有项目经理能做的事"。
 
+**项目删除已停用（2026-10-14）**：`projects.deleteProject` 保留函数名与校验器，但先鉴权再
+恒抛 `PROJECT_DELETE_DISABLED` —— 谁都不能删（旧前端点到它会得到明确中文提示，而不是
+"Could not find public function"）。级联清理逻辑原样保留在 `internal.projects.purgeProject`
+（`internalMutation`，见 §7），只有拿 deployment 凭证的运维能在 CLI 里按 id 显式执行。
+
+**`projects` 列表返回的 `role` 说的是「调用者」在该项目里的身份**：`owner` / `member` / `guest`。
+`guest` = 有有效账号但不是该项目成员 —— 全局管理员浏览「全部项目」时就是它，**不是** `projectMembers`
+里的存储值，只由 `listAllProjects` 在查不到调用者成员行时产出。`listMyProjects` 只会给
+owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加入的项目」列表（`role === "guest"`）
+都据此判断 —— 2026-10-14 之前它按 `project.ownerId` 反推，导致每个项目都误显示「拥有者」。
+
 **已知不一致（UI 比服务端更严，改动时注意）：**
 `getProject` 把 `pendingRequests` 返回给**所有成员**，`decideJoinRequest` / `inviteUser` / `updateProject`
 服务端也只要求「是成员」，而 UI 只对 owner 显示这些入口。服务端并未强制 owner。
@@ -358,7 +381,9 @@ snapshots/               数据快照（已 gitignore）
 - **auth.ts**：`register` `login` `logout` `me` `listUsers` `setUserRole` `setUserStatus` `adminStats` `isAdmin`
 - **projects.ts**：`createProject` `listMyProjects` `listAllProjects` `myInvitations` `getProject` `discoverProjects`
   `requestToJoin` `inviteUser` `requestToJoinByKey` `decideJoinRequest` `respondToInvitation`
-  `listMyJoinRequests` `removeMember` `updateProject` `deleteProject`
+  `listMyJoinRequests` `removeMember` `updateProject`
+  `deleteProject`（⛔ **已停用**：先鉴权，然后恒抛 `PROJECT_DELETE_DISABLED`，不做任何删除）
+  ＋内部 `purgeProject`（`internalMutation`，客户端不可达，级联删除 12 张表，见 §6/§7.6）
 - **boards.ts**：`listBoards` `getBoard` `createBoard` `updateBoard`（另导出内部 `createBoardRecord`）
 - **goals.ts**：`createGoal` `updateGoal` `deleteGoal` `reorderGoal` `planGoalToSprint`
   `moveGoal`（owner 手工移动列，记日志）
@@ -427,7 +452,7 @@ snapshots/               数据快照（已 gitignore）
   | 卡片 | 新建 | 修改类别 | 用哪套词表 |
   | --- | --- | --- | --- |
   | 目标项 | `ProductList` 的单行输入框（**只在「待处理」列渲染**） | `GoalDrawer`（抽屉，选中即存） | `data.goalLabels` |
-  | 任务项 | `NewTaskModal`（名称/负责人/期限/关联目标项） | `TaskEditor`（「未分类」可清空） | `data.labels` |
+  | 任务项 | `NewTaskModal`（名称/负责人/期限/关联目标项；**负责人默认＝当前登录用户**） | `TaskEditor`（「未分类」可清空） | `data.labels` |
 
   `GoalDrawer` 的字段是：标题 / 类别 / 客户价值估计 / 检查列表 / 附件 —— **没有描述**
   （见 §5 的「卡片不填描述」），**也没有任务进展统计**（不显示 N/M 个任务已完成、不带进度条；
@@ -450,6 +475,8 @@ snapshots/               数据快照（已 gitignore）
   新建迭代时开始/结束日期都有默认值（下一个周一 + 周期 − 1 天），并**都可以手工改**。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
+  管理员在「全部项目」下另有顶部汇总（项目/看板/目标项，来自 `auth.adminStats`，仅在 admin 且 scope=all 时查）
+  与「可加入的项目」表（只列 `role === "guest"` 且未邀请我的项目）；「拥有者」徽章只在 `role === "owner"` 时显示。
 - `AuthPage.tsx`：登录/注册 + **「后端数据」切换器**（`环境` 只在这里能改）。
   切换写在登录页而不是设置页是**故意的** —— 两个 deployment 的账号互不相通，所以换后端必然要重新登录。
   切换器下方显示当前 deployment 主机名，避免"看不出自己在哪个库"。
@@ -624,7 +651,8 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
 - `TaskCard` 有两段重复 JSDoc，第一段已过时；`hours()` 与 `hrs()` 是重复实现。
 - 直接展示了错误码字符串 `"INVALID_CUSTOMER_VALUE"` 而非走 `describeError`。
 - `ProjectsPage` 的 `listMyJoinRequests` 未加 `"skip"` 守卫（其余 query 都有）。
-- `listAllProjects` 返回的 `role` 是按 `ownerId` 推的，不代表调用者的真实成员关系。
+- `projects.deleteProject` 现在是**永久拒绝的占位实现**（保留是为了让旧前端拿到明确错误码），
+  级联删除只在内部 `purgeProject` 里。⚠️ 不要"顺手"把它改回可删除。
 - 2026-10-13 删掉了 `src/lib/ui.ts` 的 `sprintDaysLeft()`：全仓无引用，而且它按时间戳算天数，
   在结束日之后会返回负数（显示「剩余 -1 天」）—— 同属上面那条「日期要按天比」的毛病。
 

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { logActivity } from "./lib/activity";
@@ -25,7 +25,7 @@ const projectValidator = v.object({
   sprintLengthDays: v.number(),
   createdAt: v.number(),
   archived: v.boolean(),
-  role: v.string(),
+  role: v.union(v.literal("owner"), v.literal("member"), v.literal("guest")),
   boards: v.number(),
   members: v.number(),
   completedGoals: v.number(),
@@ -157,11 +157,19 @@ export const createProject = mutation({
   },
 });
 
+/**
+ * 调用者在某个项目里的身份。
+ *
+ * `guest` = 有有效账号、但不是该项目成员 —— 全局管理员浏览「全部项目」时就是这种身份
+ * （§6：管理员在项目内是只读访客）。它**不是** `projectMembers` 里的一种 role。
+ */
+type ProjectRole = "owner" | "member" | "guest";
+
 /** Builds one row of the project list. */
 async function projectSummary(
   ctx: QueryCtx,
   project: Doc<"projects">,
-  role: "owner" | "member",
+  role: ProjectRole,
 ) {
   const [boards, memberCount, goals] = await Promise.all([
     ctx.db
@@ -260,21 +268,28 @@ export const listAllProjects = query({
   },
   returns: pagedProjectsValidator,
   handler: async (ctx, args) => {
-    await requireAdmin(ctx, args.token);
+    const user = await requireAdmin(ctx, args.token);
 
     const projects = (await ctx.db.query("projects").collect()).filter((p) => !p.archived);
     projects.sort((a, b) => b.createdAt - a.createdAt);
 
-    const memberships = new Map<string, "owner" | "member">();
-    for (const m of await ctx.db.query("projectMembers").collect()) {
-      memberships.set(m.userId as string, m.role);
-    }
+    // `role` 描述的是**调用者**与这个项目的关系，所以只查调用者自己的成员行
+    // （by_user 索引）。全局管理员对绝大多数项目没有成员身份 → "guest"。
+    // ⚠️ 曾经这里按 `project.ownerId` 去查一张全局 userId→role 的表，等于返回"项目
+    // 拥有者在别的项目里的角色"，于是「全部项目」里每个项目都显示成「拥有者」。
+    const myMemberships = await ctx.db
+      .query("projectMembers")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+    const myRoleByProject = new Map<string, "owner" | "member">(
+      myMemberships.map((m) => [m.projectId as string, m.role]),
+    );
 
     const { size, skip } = pageWindow(args.limit, args.offset);
     const page = projects.slice(skip, skip + size);
     const items = [];
     for (const project of page) {
-      const role = memberships.get(project.ownerId as string) ?? "member";
+      const role = myRoleByProject.get(project._id as string) ?? "guest";
       items.push(await projectSummary(ctx, project, role));
     }
 
@@ -876,14 +891,45 @@ export const updateProject = mutation({
   },
 });
 
+/**
+ * ⛔ 项目删除已停用（2026-10-14）。
+ *
+ * Deleting a project cascades over 12 tables, so a single mis-click can wipe a
+ * whole project's history. The app therefore has **no** delete entry point any
+ * more, and this public mutation always refuses — for every caller, admin or
+ * owner alike. Projects are only ever removed deliberately, by id, through the
+ * internal `purgeProject` below.
+ *
+ * The name and validators are kept (instead of deleting the function outright)
+ * so a still-running old frontend that clicks 删除项目 gets a clear business
+ * error rather than "Could not find public function".
+ */
 export const deleteProject = mutation({
   args: { token: v.optional(v.string()), projectId: v.id("projects") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const user = await requireUser(ctx, args.token);
-    const { project } = await requireProjectMember(ctx, args.projectId, user._id);
-    if (project.ownerId !== user._id) throw new Error("OWNER_ONLY");
+    // Authenticate first, so an anonymous caller gets UNAUTHENTICATED rather
+    // than a business error code.
+    await requireUser(ctx, args.token);
+    throw new Error("PROJECT_DELETE_DISABLED");
+  },
+});
 
+/**
+ * 内部专用：按 id 完整级联删除一个项目（12 张表，Convex 没有外键）。
+ *
+ * `internalMutation` 不进公开 API，任何客户端（管理员也一样）都调用不到；
+ * 只有拿着 deployment 凭证的人能在命令行显式执行：
+ *
+ *   npx convex run projects:purgeProject '{"projectId":"<id>"}'
+ *
+ * ⛔ 产品库（prod）数据只增不删（AGENTS.md §2）：除非确认要清掉某条具体记录，
+ * 否则不要执行；执行前先 `bash scripts/backup-deployments.sh`。
+ */
+export const purgeProject = internalMutation({
+  args: { projectId: v.id("projects") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
     // Cascade by hand — Convex has no foreign keys.
     const boards = await ctx.db
       .query("boards")

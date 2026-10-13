@@ -155,6 +155,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   CANNOT_SUSPEND_SELF: "不能停用自己的账户",
   LAST_ADMIN: "系统至少需要保留一名管理员",
   ITEM_CREATE_FAILED: "创建失败，请重试",
+  PROJECT_DELETE_DISABLED: "项目不可删除：为避免误删，项目创建后不再提供删除功能",
 };
 
 export function describeError(err: unknown): string {

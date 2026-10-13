@@ -210,6 +210,7 @@ export default function App({
           key={view.id}
           token={token}
           boardId={view.id}
+          currentUserId={me._id}
           onBack={() => setView({ kind: "project", id: view.projectId })}
           onNavigate={(id) => setView({ kind: "board", id, projectId: view.projectId })}
           isProjectOwner={projectOwnerIds.has(view.projectId)}

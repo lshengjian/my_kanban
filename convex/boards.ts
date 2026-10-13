@@ -339,12 +339,21 @@ export const getBoard = query({
         .map(toTaskRow),
     }));
 
+    // 目标项挂在预期成果看板的列上，「已完成」一律由列的 `isDone` 推导
+    // （与 listBoards / projects.countCompleted 同一口径），不信存储字段。
+    // 迭代看板借用预期成果看板的列（见上面 `columns`），所以这两种 kind 都适用。
+    const doneColumnIds = new Set(
+      columns.filter((c) => c.isDone).map((c) => c._id as string),
+    );
+    // 本看板"拥有"的目标项：迭代看板＝排入它的，预期成果看板＝boardId 指向它的。
+    const ownedGoals =
+      board.kind === "sprint"
+        ? allGoals.filter((g) => g.sprintId === board._id)
+        : allGoals.filter((g) => g.boardId === board._id);
+
     const counts = {
-      goals:
-        board.kind === "sprint"
-          ? allGoals.filter((g) => g.sprintId === board._id).length
-          : allGoals.filter((g) => g.boardId === board._id).length,
-      goalsDone: 0,
+      goals: ownedGoals.length,
+      goalsDone: ownedGoals.filter((g) => doneColumnIds.has(g.columnId as string)).length,
       tasks: allTasks.length,
       tasksDone: allTasks.filter((t) => t.status === "done").length,
       estimatedHours: allTasks.reduce((sum, t) => sum + (t.estimatedHours ?? 0), 0),
@@ -395,7 +404,7 @@ export const getBoard = query({
         .sort((a, b) => a.position - b.position || a._creationTime - b._creationTime)
         .map(toGoalRow),
       members,
-      counts: { ...counts, goalsDone: 0 },
+      counts,
     };
   },
 });

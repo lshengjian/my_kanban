@@ -13,6 +13,8 @@ import { ActivityFeed } from "./ActivityFeed";
 type Props = {
   token: string;
   boardId: Id<"boards">;
+  /** 当前登录用户 —— 新增任务项时默认由自己负责。 */
+  currentUserId: Id<"users">;
   onBack: () => void;
   /** Jump straight to a sibling board without going back to the project. */
   onNavigate: (boardId: Id<"boards">) => void;
@@ -89,9 +91,9 @@ function ProductList({
 
   /**
    * The product list is hand-filled from 待处理 only. A goal reaches 处理中 by
-   * being planned into an 迭代 and 已完成 by finishing its tasks, so offering an
-   * add box in those columns would let you write a state the board immediately
-   * contradicts. The server enforces the same rule.
+   * being planned into an 迭代 and 已完成 by an owner moving the card there by
+   * hand, so offering an add box in those columns would let you write a state
+   * the board immediately contradicts. The server enforces the same rule.
    */
   const intakeColumnId = data.columns.find((c) => c.name === GOAL_COLUMNS[0])?._id;
   /** New cards are name-only; 类别 is picked later in the goal's detail panel. */
@@ -347,10 +349,13 @@ function PlanModal({
 function IterationView({
   data,
   token,
+  currentUserId,
   onOpenGoal,
 }: {
   data: BoardData;
   token: string;
+  /** 新增任务项的默认负责人。 */
+  currentUserId: Id<"users">;
   onOpenGoal: (goal: Goal) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -437,7 +442,14 @@ function IterationView({
         />
       )}
 
-      {adding && <NewTaskModal token={token} data={data} onClose={() => setAdding(false)} />}
+      {adding && (
+        <NewTaskModal
+          token={token}
+          data={data}
+          currentUserId={currentUserId}
+          onClose={() => setAdding(false)}
+        />
+      )}
       {timing && (
         <TimeModal
           token={token}
@@ -764,15 +776,25 @@ function TimeModal({
 function NewTaskModal({
   token,
   data,
+  currentUserId,
   onClose,
 }: {
   token: string;
   data: BoardData;
+  /** 当前登录用户：新增的任务项默认由自己负责。 */
+  currentUserId: Id<"users">;
   onClose: () => void;
 }) {
   const create = useMutation(api.goals.createTask);
   const [title, setTitle] = useState("");
-  const [assignee, setAssignee] = useState<string>(data.members[0]?._id ?? "");
+  // 默认负责人＝当前用户。全局管理员可能是「非成员的只读访客」，此时它不在
+  // `members` 里，`<select>` 会选不中任何 option（界面与 state 不一致），
+  // 所以这种情况回退到第一位成员。
+  const [assignee, setAssignee] = useState<string>(
+    data.members.some((m) => m._id === currentUserId)
+      ? currentUserId
+      : (data.members[0]?._id ?? ""),
+  );
   const [due, setDue] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -1082,6 +1104,7 @@ function BoardTabs({
 export default function BoardPage({
   token,
   boardId,
+  currentUserId,
   onBack,
   onNavigate,
   isProjectOwner,
@@ -1151,7 +1174,12 @@ export default function BoardPage({
           onOpenGoal={setOpenGoal}
         />
       ) : (
-        <IterationView data={data} token={token} onOpenGoal={setOpenGoal} />
+        <IterationView
+          data={data}
+          token={token}
+          currentUserId={currentUserId}
+          onOpenGoal={setOpenGoal}
+        />
       )}
 
       {showLabels && (
