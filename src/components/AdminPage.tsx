@@ -38,13 +38,11 @@ export default function AdminPage({ token }: { token: string }) {
 
       {stats && (
         <div className="grid-cards" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", marginBottom: 22 }}>
+          {/* 只放用户相关的统计：项目/看板/目标项是内容量，不属于用户管理 */}
           {[
             ["用户", stats.users],
             ["管理员", stats.admins],
             ["已停用", stats.suspended],
-            ["项目", stats.projects],
-            ["看板", stats.boards],
-            ["目标项", stats.goals],
           ].map(([label, value]) => (
             <div key={String(label)} className="card" style={{ padding: 16 }}>
               <div className="faint" style={{ fontSize: 12 }}>{label}</div>

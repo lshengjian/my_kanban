@@ -453,7 +453,12 @@ snapshots/               数据快照（已 gitignore）
 - `AuthPage.tsx`：登录/注册 + **「后端数据」切换器**（`环境` 只在这里能改）。
   切换写在登录页而不是设置页是**故意的** —— 两个 deployment 的账号互不相通，所以换后端必然要重新登录。
   切换器下方显示当前 deployment 主机名，避免"看不出自己在哪个库"。
-- `AdminPage.tsx` 用户管理；`PresetPage.tsx` + `TemplateEditor.tsx` 管理员维护系统预设；
+- `AdminPage.tsx` 用户管理：**只显示用户相关统计**（用户 / 管理员 / 已停用）。
+  项目数、看板数、目标项数是**内容量**，不属于这个页面，2026-10-13 已从这里移除 ——
+  要看内容量请到项目页/看板页，它们各自都有统计。
+  （`auth.adminStats` 仍返回这三个字段，只是前端不展示了：哪天要放到别处是纯前端改动。
+  若最终决定哪里都不放，就把这三个字段连同 `adminStats` 里的查询一起删掉。）
+  `PresetPage.tsx` + `TemplateEditor.tsx` 管理员维护系统预设；
   `LabelManager.tsx` 看板内卡片类型管理（`canManage` 由 owner 决定，非 owner 见「仅项目经理可修改」）。
 
 ### 共享 UI 原语（`src/components/ui.tsx`）—— 必须复用，不要自己造
