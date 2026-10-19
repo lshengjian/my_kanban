@@ -74,12 +74,12 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
   | deployment | `lsj1788:kanban:kanban-dev` | `lsj1788:kanban:production` |
   | URL | `https://fine-ibis-920.convex.cloud` | `https://coordinated-camel-303.convex.cloud` |
   | 选它的命令 | 默认（`.env.local`） | 加 `--prod` |
-  | 数据 | **已有真实数据**（见下） | **空库** |
+  | 数据 | **已开始正式使用**（见下） | **已开始正式使用**（不再是空库） |
 
-  **prod 仍是空库**（2026-10-12 清空后未再写入）。**dev 已开始正式使用**：只有项目「示范项目」
-  （属于 `lsj178@139.com`）一个项目 —— 它的预期成果看板类别是 `约束 / 功能 / 性能`，
-  迭代「迭代 1」的类别是 `文档 / 测试 / 程序 / 美术 / 策划`。
-  → **dev 也不再是可以随便清的测试库**，动手前先 `backup-deployments.sh`。
+  **prod 不再是空库**（2026-10-19 复查）：已注册 2 个账号、1 个项目、1 个看板、5 个卡片类型，
+  但**还没有任何目标项**。**dev 也在正式使用**：项目「示范项目」（属于 `lsj178@139.com`）及多个
+  迭代；它的预期成果看板类别是 `约束 / 功能 / 性能`。
+  → **两个 deployment 都是真实数据，任何结构变更前先 `backup-deployments.sh`。**
 
   ### ⛔ 产品库数据不可删除（硬性约定，2026-10-12 起）
 
@@ -89,9 +89,9 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
   `scripts/purge-except.mjs` 早已用 `ALLOW_PURGE=1` 闸门拒绝执行，照旧遵守。
   **改表结构的正确顺序是「先导出 → 改 → 再导入」**，见 §12；不要用"清空重来"代替迁移。
 
-  清空前的完整快照在 `backups/2026-10-12T07-39-20/{dev,prod}.zip`，
+  2026-10-12 清空前的完整快照在 `backups/2026-10-12T07-39-20/{dev,prod}.zip`，
   需要时可用 `npx convex import [--prod] --replace <zip>` 恢复。
-  注意空库（prod）的两个后果：
+  注意全新部署（空库）的两个后果：
   1. **没有账号** → 第一个注册的人自动成为管理员（这是设计内的引导流程）。
   2. **没有系统级预设** → 新看板的类别由内置 `DEFAULT_LABELS` 兜底（见 §5）。
      「卡片类型」页此时显示"暂无预设，新建时将使用内置默认值"。
@@ -561,7 +561,7 @@ owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加�
 | | dev | prod |
 | --- | --- | --- |
 | 推送命令 | `npx convex dev --once` | `npx convex deploy` |
-| 数据 | **已有真实数据**（见 §2） | **空库**（见 §2） |
+| 数据 | **真实数据**（见 §2） | **真实数据**（2026-10-19 起不再是空库，见 §2） |
 | 错误信息 | 完整（含错误码与堆栈） | **被脱敏**（见 §11） |
 
 - `npx convex deploy` **强制交互确认**，非交互终端会直接失败（`Cannot prompt for input`）。
