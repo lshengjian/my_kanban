@@ -132,7 +132,9 @@ export function deriveSprintStatus(board: {
 }): "planned" | "active" | "closed" {
   const today = startOfDay(Date.now());
   if (board.endDate !== undefined && today > startOfDay(board.endDate)) return "closed";
-  if (board.startDate !== undefined && today > startOfDay(board.startDate)) return "active";
+  // 开始日**当天**就算进行中（2026-10-14 起）：团队当天就要开工，等次日才变
+  // 「进行中」会让当天的燃尽图/范围规则看起来还没开始。
+  if (board.startDate !== undefined && today >= startOfDay(board.startDate)) return "active";
   return "planned";
 }
 

@@ -1968,3 +1968,22 @@ label { font-size: 0.875rem; }
     min-width: 0;
   }
 }
+
+/* ---- Mobile board swipe hint ------------------------------------------
+   手机上三列看板是横向滑动切换的（桌面三列并排），默认没有任何提示，用户容易
+   以为只有一列。只在 ≤760px 显示。 */
+.board-swipe-hint { display: none; }
+
+@media (max-width: 760px) {
+  .board-swipe-hint {
+    display: block;
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12.5px;
+    text-align: center;
+  }
+}

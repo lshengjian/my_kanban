@@ -16,6 +16,7 @@ import {
   describeError,
   formatDate,
   sprintStatusMeta,
+  toDateInput,
 } from "../lib/ui";
 import { ActivityFeed } from "./ActivityFeed";
 import {
@@ -62,10 +63,7 @@ export default function ProjectPage({
   const [sprintStart, setSprintStart] = useState("");
   const [sprintEnd, setSprintEnd] = useState("");
   const [sprintGoal, setSprintGoal] = useState("");
-  const [settingsFor, setSettingsFor] = useState<{
-    _id: Id<"boards">;
-    name: string;
-  } | null>(null);
+  const [settingsFor, setSettingsFor] = useState<BoardSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -366,21 +364,24 @@ export default function ProjectPage({
                     <h3>{board.name}</h3>
                     <div className="spacer" />
                     <Badge color={meta.color} soft>{meta.label}</Badge>
-                    {canManage && (
-                      <button
-                        className="btn btn-ghost btn-icon btn-sm"
-                        title="迭代设置"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSettingsFor({
-                            _id: board._id,
-                            name: board.name,
-                          });
-                        }}
-                      >
-                        ⚙
-                      </button>
-                    )}
+                    {/* 迭代设置对所有项目成员开放（不是 owner 专属）：服务端
+                        updateBoard 本来就只要求「是项目成员」。 */}
+                    <button
+                      className="btn btn-ghost btn-icon btn-sm"
+                      title="迭代设置"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSettingsFor({
+                          _id: board._id,
+                          name: board.name,
+                          goal: board.goal,
+                          startDate: board.startDate,
+                          endDate: board.endDate,
+                        });
+                      }}
+                    >
+                      ⚙
+                    </button>
                   </div>
                   {board.goal ? (
                     <div className="muted" style={{ fontSize: 13 }}>🎯 {board.goal}</div>
@@ -408,7 +409,7 @@ export default function ProjectPage({
 
           <button
             className="card project-card"
-            onClick={() => setShowBoard(true)}
+            onClick={openNewBoard}
             aria-disabled={!canManage}
             disabled={!canManage}
             style={{
@@ -775,9 +776,13 @@ function ProjectSettingsDialog({
   );
 }
 
+/** 迭代设置弹窗要回填的字段；`startDate`/`endDate` 只对迭代看板有值。 */
 type BoardSettings = {
   _id: Id<"boards">;
   name: string;
+  goal?: string;
+  startDate?: number;
+  endDate?: number;
 };
 
 function BoardSettingsDialog({
@@ -791,18 +796,56 @@ function BoardSettingsDialog({
   board: BoardSettings;
   updateBoard: ReturnType<typeof useMutation<typeof api.boards.updateBoard>>;
   onClose: () => void;
-  onSaved: (v: { name: string }) => void;
+  onSaved: (v: { name: string; goal: string; startDate?: number; endDate?: number }) => void;
 }) {
   const toast = useToast();
   const [name, setName] = useState(board.name);
+  const [goal, setGoal] = useState(board.goal ?? "");
+  const [start, setStart] = useState(
+    board.startDate === undefined ? "" : toDateInput(new Date(board.startDate)),
+  );
+  const [end, setEnd] = useState(
+    board.endDate === undefined ? "" : toDateInput(new Date(board.endDate)),
+  );
   const [busy, setBusy] = useState(false);
   const trimmed = name.trim();
+  /** 只有迭代看板有起止日期（预期成果看板的列没有日期）。 */
+  const hasDates = board.startDate !== undefined || board.endDate !== undefined;
+
+  const save = async () => {
+    const startTs = start ? new Date(`${start}T00:00:00`).getTime() : undefined;
+    const endTs = end ? new Date(`${end}T00:00:00`).getTime() : undefined;
+    if (startTs !== undefined && endTs !== undefined && endTs <= startTs) {
+      toast.push(describeError(new Error("INVALID_SPRINT_RANGE")));
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateBoard({
+        token,
+        boardId: board._id,
+        name: trimmed,
+        goal: goal.trim(),
+        ...(hasDates ? { startDate: startTs, endDate: endTs } : {}),
+      });
+      onSaved({ name: trimmed, goal: goal.trim(), startDate: startTs, endDate: endTs });
+      onClose();
+    } catch (err) {
+      toast.push(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <Modal title={`列表设置 · ${board.name}`} subtitle="修改这个列表的名称" onClose={onClose}>
+    <Modal
+      title={`迭代设置 · ${board.name}`}
+      subtitle="项目成员都可以修改迭代的名称、目标与起止日期"
+      onClose={onClose}
+    >
       <div className="form-row">
         <div className="field">
-          <label htmlFor="bsetname">列表名称</label>
+          <label htmlFor="bsetname">迭代名称</label>
           <input
             id="bsetname"
             className="input"
@@ -811,26 +854,46 @@ function BoardSettingsDialog({
             maxLength={80}
           />
         </div>
+        <div className="field">
+          <label htmlFor="bsetgoal">迭代目标</label>
+          <input
+            id="bsetgoal"
+            className="input"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="本迭代要达成什么（可留空）"
+            maxLength={200}
+          />
+        </div>
+        {hasDates && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div className="field">
+              <label htmlFor="bsetstart">开始日期</label>
+              <input
+                id="bsetstart"
+                type="date"
+                className="input"
+                value={start}
+                onChange={(e) => setStart(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="bsetend">结束日期</label>
+              <input
+                id="bsetend"
+                type="date"
+                className="input"
+                value={end}
+                onChange={(e) => setEnd(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn" onClick={onClose}>
             取消
           </button>
-          <button
-            className="btn btn-primary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await updateBoard({ token, boardId: board._id, name: trimmed });
-                onSaved({ name: trimmed });
-                onClose();
-              } catch (err) {
-                toast.push(describeError(err));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
+          <button className="btn btn-primary" disabled={busy} onClick={save}>
             {busy ? "保存中…" : "保存"}
           </button>
         </div>

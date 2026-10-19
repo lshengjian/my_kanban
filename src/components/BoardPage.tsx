@@ -1166,6 +1166,10 @@ export default function BoardPage({
 
       {!isProduct && <SprintHeader board={data.board} token={token} boardId={boardId} />}
 
+      {/* 手机端三列是横向滑动切换的（桌面三列并排），默认没有任何提示，
+          用户容易以为只有一列。桌面端由 CSS 隐藏。 */}
+      <p className="board-swipe-hint">💡 左右滑动「状态名称」即可切换到其他状态</p>
+
       {isProduct ? (
         <ProductList
           data={data}
