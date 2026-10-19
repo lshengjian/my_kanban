@@ -146,8 +146,7 @@ export default defineSchema({
     // A reference, not a copy: the name and colour live on the label row.
     // Deleting the label is blocked while a card still points at it.
     labelId: v.optional(v.id("labels")),
-    // The 迭代 this goal is committed to. Present ⇒ it is 处理中.
-    sprintId: v.optional(v.id("boards")),
+    // 目标项属于哪些迭代 → 见下面的 `goalSprints`（2026-10-19 起是多对多）。
     // 客户价值估计 — 1~10 的相对价值刻度，由 PO 评定。
     // 这是发布燃尽图的纵轴单位。
     value: v.optional(v.number()),
@@ -161,8 +160,22 @@ export default defineSchema({
     .index("by_board", ["boardId"])
     .index("by_column", ["columnId"])
     .index("by_project", ["projectId"])
-    .index("by_label", ["labelId"])
-    .index("by_sprint", ["sprintId"]),
+    .index("by_label", ["labelId"]),
+
+  // ---- Goal ↔ 迭代 多对多 ---------------------------------------------
+  // 一个目标项可以排入多个迭代（只要那个迭代还没结束）。`countsForValue`
+  // 标记「首个排入的迭代」—— 客户价值只归它一次，供发布燃尽图/后续统计使用。
+  goalSprints: defineTable({
+    projectId: v.id("projects"),
+    goalId: v.id("goals"),
+    sprintId: v.id("boards"),
+    countsForValue: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_goal", ["goalId", "createdAt"])
+    .index("by_sprint", ["sprintId", "createdAt"])
+    .index("by_project", ["projectId"])
+    .index("by_goal_sprint", ["goalId", "sprintId"]),
 
   // ---- Tasks (任务项) --------------------------------------------------
   // The executable units the team breaks a goal down into, inside one 迭代.

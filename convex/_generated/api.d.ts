@@ -19,6 +19,7 @@ import type * as lib_auth from "../lib/auth.js";
 import type * as lib_board from "../lib/board.js";
 import type * as lib_burndown from "../lib/burndown.js";
 import type * as lib_constants from "../lib/constants.js";
+import type * as lib_goalSprints from "../lib/goalSprints.js";
 import type * as lib_labelPresets from "../lib/labelPresets.js";
 import type * as lib_password from "../lib/password.js";
 import type * as progress from "../progress.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   "lib/board": typeof lib_board;
   "lib/burndown": typeof lib_burndown;
   "lib/constants": typeof lib_constants;
+  "lib/goalSprints": typeof lib_goalSprints;
   "lib/labelPresets": typeof lib_labelPresets;
   "lib/password": typeof lib_password;
   progress: typeof progress;

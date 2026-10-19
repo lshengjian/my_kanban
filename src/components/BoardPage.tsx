@@ -76,18 +76,20 @@ function ProductList({
   const createGoal = useMutation(api.goals.createGoal);
   const reorder = useMutation(api.goals.reorderGoal);
   const moveGoal = useMutation(api.goals.moveGoal);
-  const plan = useMutation(api.goals.planGoalToSprint);
   const boards = useQuery(
     api.boards.listBoards,
     token ? { token, projectId: data.board.projectId } : "skip",
   );
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [planning, setPlanning] = useState<Goal | null>(null);
+  // 存 id 而不是整个 Goal：排入/移出之后 `data` 会刷新，弹窗要读最新的归属状态。
+  const [planningId, setPlanningId] = useState<Id<"goals"> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const sprints = (boards ?? []).filter((b) => b.kind === "sprint" && !b.archived);
   const sprintName = (id: Id<"boards">) =>
     sprints.find((s) => s._id === id)?.name ?? "迭代";
+  const planningGoal =
+    planningId === null ? null : data.goals.find((g) => g._id === planningId) ?? null;
 
   /**
    * The product list is hand-filled from 待处理 only. A goal reaches 处理中 by
@@ -143,50 +145,46 @@ function ProductList({
                           任务 {goal.taskDone}/{goal.taskTotal}
                         </span>
                       )}
-                      {goal.sprintId && (
-                        <span className="badge accent">{sprintName(goal.sprintId)}</span>
-                      )}
+                      {goal.sprintIds.map((id) => (
+                        <span className="badge accent" key={id}>
+                          {sprintName(id)}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
-                  {!column.isDone && goal.sprintId === undefined && (
+                  {!column.isDone && (
                     <div className="card-actions">
-                      <button
-                        className="icon-btn"
-                        title="上移（提高优先级）"
-                        disabled={index === 0}
-                        onClick={() =>
-                          reorder({ token, goalId: goal._id, toIndex: index - 1 })
-                        }
-                      >
-                        ↑
+                      {/* 已排入迭代的卡片不再参与手动排序（与旧行为一致）。 */}
+                      {goal.sprintIds.length === 0 && (
+                        <>
+                          <button
+                            className="icon-btn"
+                            title="上移（提高优先级）"
+                            disabled={index === 0}
+                            onClick={() =>
+                              reorder({ token, goalId: goal._id, toIndex: index - 1 })
+                            }
+                          >
+                            ↑
+                          </button>
+                          <button
+                            className="icon-btn"
+                            title="下移（降低优先级）"
+                            disabled={index === column.goals.length - 1}
+                            onClick={() =>
+                              reorder({ token, goalId: goal._id, toIndex: index + 1 })
+                            }
+                          >
+                            ↓
+                          </button>
+                        </>
+                      )}
+                      <button className="btn btn-sm" onClick={() => setPlanningId(goal._id)}>
+                        {goal.sprintIds.length > 0
+                          ? `迭代（${goal.sprintIds.length}）`
+                          : "排入迭代"}
                       </button>
-                      <button
-                        className="icon-btn"
-                        title="下移（降低优先级）"
-                        disabled={index === column.goals.length - 1}
-                        onClick={() =>
-                          reorder({ token, goalId: goal._id, toIndex: index + 1 })
-                        }
-                      >
-                        ↓
-                      </button>
-                      <button className="btn btn-sm" onClick={() => setPlanning(goal)}>
-                        排入迭代
-                      </button>
-                    </div>
-                  )}
-
-                  {/* 移出迭代会**连带删除该目标项的任务**（任务属于迭代，会变孤儿），
-                      所以：① 只给 owner 看；② 必须两步确认，且确认文案里写明后果。 */}
-                  {goal.sprintId && isOwner && (
-                    <div className="card-actions">
-                      <ConfirmButton
-                        label="移出迭代"
-                        confirmLabel="确认移出并删除任务"
-                        className="btn btn-sm btn-ghost"
-                        onConfirm={() => plan({ token, goalId: goal._id })}
-                      />
                     </div>
                   )}
 
@@ -239,34 +237,44 @@ function ProductList({
         ))}
       </div>
 
-      {planning && (
+      {planningGoal && (
         <PlanModal
           token={token}
           projectId={data.board.projectId}
-          goal={planning}
+          goal={planningGoal}
+          isOwner={isOwner}
           sprints={sprints.map((s) => ({
             _id: s._id,
             name: s.name,
             status: s.sprintStatus ?? "planned",
           }))}
-          onClose={() => setPlanning(null)}
+          onClose={() => setPlanningId(null)}
         />
       )}
     </>
   );
 }
 
+/**
+ * 目标项 ↔ 迭代 的归属面板。
+ *
+ * 一个目标项可以同时排入**多个**迭代，只要那个迭代还没结束（结束即冻结）。
+ * 移出某个迭代会删掉该迭代里属于这个目标项的任务，所以只有 owner 能移出，
+ * 且用两步确认；一般成员只读。
+ */
 function PlanModal({
   token,
   projectId,
   goal,
   sprints,
+  isOwner,
   onClose,
 }: {
   token: string;
   projectId: Id<"projects">;
   goal: Goal;
   sprints: { _id: Id<"boards">; name: string; status: "planned" | "active" | "closed" }[];
+  isOwner: boolean;
   onClose: () => void;
 }) {
   const plan = useMutation(api.goals.planGoalToSprint);
@@ -274,16 +282,18 @@ function PlanModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Scope is frozen when a sprint starts, so only 未开始 ones are offered.
-  const open = sprints.filter((s) => s.status === "planned");
-  const blocked = sprints.filter((s) => s.status !== "planned");
+  const plannedIds = new Set(goal.sprintIds.map((id) => id as string));
+  const joined = sprints.filter((s) => plannedIds.has(s._id as string));
+  // 迭代只在**结束**后冻结；未开始与进行中的都可以继续加入。
+  const open = sprints.filter((s) => !plannedIds.has(s._id as string) && s.status !== "closed");
+  const closed = sprints.filter((s) => !plannedIds.has(s._id as string) && s.status === "closed");
 
+  /** 动作后**不关闭**弹窗：连续排入多个迭代时数据会刷新，弹窗保持打开。 */
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
     try {
       await fn();
-      onClose();
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -292,7 +302,43 @@ function PlanModal({
   };
 
   return (
-    <Modal title="排入迭代" subtitle={`「${goal.title}」将进入「处理中」`} onClose={onClose}>
+    <Modal
+      title="迭代归属"
+      subtitle={`「${goal.title}」可以同时排入多个尚未结束的迭代`}
+      onClose={onClose}
+    >
+      {joined.length > 0 && (
+        <>
+          <div className="section-title" style={{ marginTop: 0 }}>已排入</div>
+          <div className="stack">
+            {joined.map((sprint) => (
+              <div className="row" key={sprint._id} style={{ gap: 8, padding: "4px 0" }}>
+                <span style={{ fontWeight: 550 }}>{sprint.name}</span>
+                <span className="badge">{SPRINT_STATUS_META[sprint.status].label}</span>
+                <div className="spacer" />
+                {isOwner ? (
+                  <ConfirmButton
+                    label="移出"
+                    confirmLabel="确认移出并删除任务"
+                    className="btn btn-sm btn-ghost"
+                    onConfirm={() =>
+                      run(() =>
+                        plan({ token, goalId: goal._id, sprintId: sprint._id, remove: true }),
+                      )
+                    }
+                  />
+                ) : (
+                  <span className="faint" style={{ fontSize: 11.5 }}>仅项目经理可移出</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="section-title" style={{ marginTop: joined.length > 0 ? 16 : 0 }}>
+        可加入的迭代
+      </div>
       {open.length > 0 ? (
         <div className="stack">
           {open.map((sprint) => (
@@ -303,20 +349,28 @@ function PlanModal({
               onClick={() => run(() => plan({ token, goalId: goal._id, sprintId: sprint._id }))}
             >
               {sprint.name}
+              <span className="faint" style={{ marginLeft: "auto", fontSize: "0.75rem" }}>
+                {SPRINT_STATUS_META[sprint.status].label}
+              </span>
             </button>
           ))}
         </div>
       ) : (
-        <p className="muted">没有可加入的迭代 —— 只能排入尚未开始的迭代。</p>
+        <p className="muted">没有可加入的迭代 —— 迭代一旦结束就不再接受目标项。</p>
       )}
 
-      {blocked.length > 0 && (
+      {closed.length > 0 && (
         <div className="stack" style={{ marginTop: 10 }}>
-          {blocked.map((sprint) => (
-            <div className="btn pick" key={sprint._id} aria-disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
+          {closed.map((sprint) => (
+            <div
+              className="btn pick"
+              key={sprint._id}
+              aria-disabled
+              style={{ opacity: 0.5, cursor: "not-allowed" }}
+            >
               {sprint.name}
               <span className="faint" style={{ marginLeft: "auto", fontSize: "0.75rem" }}>
-                {sprint.status === "planned" ? "未开始" : SPRINT_STATUS_META[sprint.status].label}
+                已结束
               </span>
             </div>
           ))}

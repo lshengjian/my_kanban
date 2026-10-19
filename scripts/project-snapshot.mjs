@@ -30,6 +30,7 @@ const PROJECT_SCOPED = [
   "boards",
   "columns",
   "goals",
+  "goalSprints",
   "tasks",
   "goalTasks",
   "checklistItems",

@@ -12,6 +12,7 @@ import {
   requireUser } from "./lib/auth";
 import { columnsOfBoard } from "./lib/board";
 import { recordReleaseBurndown, recordSprintBurndown } from "./lib/burndown";
+import { groupLinks, linksOfProject } from "./lib/goalSprints";
 import {
   BOARD_KINDS,
   DEFAULT_SPRINT_DAYS,
@@ -50,7 +51,8 @@ const goalRowValidator = v.object({
   _id: v.id("goals"),
   title: v.string(),
   labelId: v.optional(v.id("labels")),
-  sprintId: v.optional(v.id("boards")),
+  /** 这个目标项排入的全部迭代（按排入时间升序）。 */
+  sprintIds: v.array(v.id("boards")),
   columnId: v.id("columns"),
   position: v.number(),
   createdAt: v.number(),
@@ -112,10 +114,13 @@ export const listBoards = query({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
 
+    // 目标项 ↔ 迭代 是多对多（`goalSprints`），一次取全项目再内存分组。
+    const { goalIdsBySprint } = groupLinks(await linksOfProject(ctx, args.projectId));
+
     const result = live.map((board) => {
       const owned =
         board.kind === "sprint"
-          ? goals.filter((g) => g.sprintId === board._id)
+          ? goals.filter((g) => goalIdsBySprint.get(board._id as string)?.has(g._id as string))
           : goals.filter((g) => g.boardId === board._id);
       const done = owned.filter((g) => goalDone.has(g._id as string)).length;
       const sprintTasks = tasks.filter((t) => t.boardId === board._id);
@@ -270,13 +275,20 @@ export const getBoard = query({
       }
     }
 
+    // 目标项 ↔ 迭代 是多对多（`goalSprints`）：一次取全项目再内存分组，
+    // 避免逐个目标项查库。
+    const { sprintIdsByGoal, goalIdsBySprint } = groupLinks(
+      await linksOfProject(ctx, board.projectId),
+    );
+
     const toGoalRow = (goal: Doc<"goals">) => {
       const tasks = tasksByGoal.get(goal._id as string) ?? [];
+      const sprintIds = sprintIdsByGoal.get(goal._id as string) ?? [];
       return {
         _id: goal._id,
         title: goal.title,
         labelId: goal.labelId,
-        sprintId: goal.sprintId,
+        sprintIds,
         columnId: goal.columnId,
         position: goal.position,
         createdAt: goal.createdAt,
@@ -345,10 +357,11 @@ export const getBoard = query({
     const doneColumnIds = new Set(
       columns.filter((c) => c.isDone).map((c) => c._id as string),
     );
-    // 本看板"拥有"的目标项：迭代看板＝排入它的，预期成果看板＝boardId 指向它的。
+    // 本看板"拥有"的目标项：迭代看板＝排入它的（可多个迭代），预期成果看板＝boardId 指向它的。
+    const ownedByThisSprint = goalIdsBySprint.get(board._id as string);
     const ownedGoals =
       board.kind === "sprint"
-        ? allGoals.filter((g) => g.sprintId === board._id)
+        ? allGoals.filter((g) => ownedByThisSprint?.has(g._id as string))
         : allGoals.filter((g) => g.boardId === board._id);
 
     const counts = {
@@ -399,8 +412,8 @@ export const getBoard = query({
           .map(toGoalRow),
       })),
       lanes,
-      goals: allGoals
-        .filter((g) => (board.kind === "sprint" ? g.sprintId === board._id : g.boardId === board._id))
+      goals: ownedGoals
+        .filter((g) => (board.kind === "sprint" ? ownedByThisSprint?.has(g._id as string) : g.boardId === board._id))
         .sort((a, b) => a.position - b.position || a._creationTime - b._creationTime)
         .map(toGoalRow),
       members,

@@ -11,6 +11,14 @@ import {
 import { columnsOfBoard } from "./lib/board";
 import { recordReleaseBurndown, recordSprintBurndown } from "./lib/burndown";
 import { GOAL_COLUMNS, TASK_LANES, deriveSprintStatus } from "./lib/constants";
+import {
+  addGoalToSprint,
+  linkOf,
+  linksOfGoal,
+  removeGoalFromSprint,
+  sprintIdsOfGoal,
+} from "./lib/goalSprints";
+import type { GoalSprintLink } from "./lib/goalSprints";
 
 const MAX_TITLE = 160;
 
@@ -75,9 +83,11 @@ async function applyColumn(
     toColumnId: column._id,
   });
 
-  // 预期成果看板与它所在的迭代都要重画。
+  // 预期成果看板与它排入的每个迭代都要重画。
   await recordReleaseBurndown(ctx, goal.projectId);
-  if (goal.sprintId) await recordSprintBurndown(ctx, goal.projectId, goal.sprintId);
+  for (const sprintId of await sprintIdsOfGoal(ctx, goal._id)) {
+    await recordSprintBurndown(ctx, goal.projectId, sprintId);
+  }
 }
 
 /**
@@ -97,7 +107,8 @@ export async function syncGoalStatus(
   const done = await columnNamed(ctx, goal.boardId, GOAL_COLUMNS[2]);
   if (goal.columnId === done._id) return { changed: false, columnName: GOAL_COLUMNS[2] };
 
-  const name = goal.sprintId ? GOAL_COLUMNS[1] : GOAL_COLUMNS[0];
+  // 已排入**任意一个**迭代就是「处理中」。
+  const name = (await linksOfGoal(ctx, goal._id)).length > 0 ? GOAL_COLUMNS[1] : GOAL_COLUMNS[0];
   const column = await columnNamed(ctx, goal.boardId, name);
   if (goal.columnId === column._id) return { changed: false, columnName: name };
 
@@ -288,6 +299,9 @@ export const deleteGoal = mutation({
       }
     }
 
+    const sprintIds = await sprintIdsOfGoal(ctx, goal._id);
+    for (const link of await linksOfGoal(ctx, goal._id)) await ctx.db.delete(link._id);
+
     await ctx.db.delete(goal._id);
     await logActivity(ctx, {
       projectId: goal.projectId,
@@ -297,7 +311,9 @@ export const deleteGoal = mutation({
       message: `删除目标项「${goal.title}」`,
     });
     await recordReleaseBurndown(ctx, goal.projectId);
-    if (goal.sprintId) await recordSprintBurndown(ctx, goal.projectId, goal.sprintId);
+    for (const sprintId of sprintIds) {
+      await recordSprintBurndown(ctx, goal.projectId, sprintId);
+    }
     return null;
   },
 });
@@ -341,15 +357,23 @@ export const reorderGoal = mutation({
 });
 
 /**
- * 排入迭代 — commits a goal to a sprint. The goal moves to 处理中 on its own
- * because it now belongs to an iteration; it reaches 已完成 only when all of
- * its tasks are done.
+ * 排入 / 移出迭代。
+ *
+ * 一个目标项可以排入**多个**迭代（2026-10-19 起）：只要目标项服务的迭代还没
+ * **结束**，就能继续加入；迭代一旦结束（`deriveSprintStatus === "closed"`）才
+ * 拒绝（`SPRINT_CLOSED`）。排入后目标项自动进「处理中」，但「已完成」是粘性的。
+ *
+ * 权限：**排入**只要项目成员；**移出**（会连带删除该迭代里属于它的任务）只有
+ * 项目 owner 能做。`remove: true` + `sprintId` 移出指定迭代；为兼容旧前端，
+ * 只传 `goalId`（无 sprintId）表示把目标项从**所有**迭代移出。
  */
 export const planGoalToSprint = mutation({
   args: {
     token: v.optional(v.string()),
     goalId: v.id("goals"),
     sprintId: v.optional(v.id("boards")),
+    /** true = 移出 `sprintId` 指定的那个迭代；缺省 = 排入。 */
+    remove: v.optional(v.boolean()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -358,52 +382,66 @@ export const planGoalToSprint = mutation({
     if (!goal) throw new Error("GOAL_NOT_FOUND");
     await requireBoardMember(ctx, goal.boardId, user._id);
 
-    if (args.sprintId === undefined) {
-      // 移出迭代是**破坏性**操作：目标项的任务属于迭代，会一并被删除。
-      // 因此只有项目 owner 能做 —— 一般成员可以排入（规划），但不能把目标项撤出
-      // 迭代、从而连带删掉别人已经登记的任务。
+    const removing = args.remove === true || args.sprintId === undefined;
+    if (removing) {
+      // 移出是**破坏性**操作：该迭代里属于此目标项的任务会被删。只有项目 owner 能做
+      // —— 一般成员可以排入（规划），但不能把目标项撤出迭代、连带删掉别人登记的任务。
       await requireProjectOwnerOf(ctx, goal.projectId, user._id);
 
-      // Checks and attachments live with the goal, so they are untouched here;
-      // only the sprint-scoped tasks are cleared.
-      if (goal.sprintId) {
+      const targets: GoalSprintLink[] =
+        args.sprintId === undefined
+          ? await linksOfGoal(ctx, goal._id)
+          : [await linkOf(ctx, goal._id, args.sprintId)].filter(
+              (l): l is GoalSprintLink => l !== null,
+            );
+      if (targets.length === 0) return null;
+
+      for (const link of targets) {
+        const sprint = await ctx.db.get(link.sprintId);
+        // Checks and attachments live with the goal and stay; only the tasks of
+        // this goal **in this sprint** are cleared.
         for (const task of await tasksOfGoal(ctx, goal._id)) {
-          const links = await ctx.db
+          if (task.boardId !== link.sprintId) continue;
+          const taskLinks = await ctx.db
             .query("goalTasks")
             .withIndex("by_task", (q) => q.eq("taskId", task._id))
             .collect();
-          const mine = links.filter((l) => l.goalId === goal._id);
-          for (const link of mine) await ctx.db.delete(link._id);
-          if (links.length === mine.length) await ctx.db.delete(task._id);
+          const mine = taskLinks.filter((l) => l.goalId === goal._id);
+          for (const row of mine) await ctx.db.delete(row._id);
+          if (taskLinks.length === mine.length) await ctx.db.delete(task._id);
         }
-        // 只解除迭代归属；`completedAt` 属于手工完成的结果，不动它。
-        await ctx.db.patch(goal._id, { sprintId: undefined });
+        // 只解除这个迭代的归属；`completedAt` 属于手工完成的结果，不动它。
+        await removeGoalFromSprint(ctx, goal._id, link.sprintId);
         await logActivity(ctx, {
           projectId: goal.projectId,
           boardId: goal.boardId,
           goalId: goal._id,
           actorId: user._id,
           type: "goal_unplanned",
-          message: `「${goal.title}」移出迭代`,
+          message: `「${goal.title}」移出${sprint ? ` ${sprint.name}` : "迭代"}`,
         });
-        await recordSprintBurndown(ctx, goal.projectId, goal.sprintId);
+        await recordSprintBurndown(ctx, goal.projectId, link.sprintId);
       }
+
       const fresh = await ctx.db.get(goal._id);
       if (fresh) await syncGoalStatus(ctx, fresh, user._id);
+      await recordReleaseBurndown(ctx, goal.projectId);
       return null;
     }
 
-    const sprint = await ctx.db.get(args.sprintId);
+    // 走到这里说明是「排入」：`removing` 已覆盖 remove:true 与无 sprintId 两种。
+    const sprintId = args.sprintId;
+    if (sprintId === undefined) return null;
+    const sprint = await ctx.db.get(sprintId);
     if (!sprint) throw new Error("SPRINT_NOT_FOUND");
     if (sprint.kind !== "sprint") throw new Error("NOT_A_SPRINT");
     if (sprint.projectId !== goal.projectId) throw new Error("CROSS_PROJECT");
-    // Scope is frozen once work starts: only a 尚未开始 的迭代 can take new
-    // goals, so a running sprint's commitment stays as it was agreed.
-    // A sprint stops accepting goals once its start day has passed.
-    if (deriveSprintStatus(sprint) !== "planned") throw new Error("SPRINT_NOT_PLANNED");
-    if (goal.sprintId === sprint._id) return null;
+    // 范围只在迭代**结束**后冻结：进行中的迭代仍可加入目标项（2026-10-19 改，
+    // 此前要求迭代必须还没开始）。
+    if (deriveSprintStatus(sprint) === "closed") throw new Error("SPRINT_CLOSED");
+    if (await linkOf(ctx, goal._id, sprintId)) return null;
 
-    await ctx.db.patch(goal._id, { sprintId: sprint._id, updatedAt: Date.now() });
+    await addGoalToSprint(ctx, goal, sprintId);
     const fresh = (await ctx.db.get(goal._id))!;
     await syncGoalStatus(ctx, fresh, user._id);
     await logActivity(ctx, {
@@ -414,6 +452,8 @@ export const planGoalToSprint = mutation({
       type: "goal_planned",
       message: `「${goal.title}」排入 ${sprint.name}`,
     });
+    await recordSprintBurndown(ctx, goal.projectId, sprint._id);
+    await recordReleaseBurndown(ctx, goal.projectId);
     return null;
   },
 });
@@ -640,7 +680,7 @@ export const createTask = mutation({
       const goal = await ctx.db.get(goalId);
       if (!goal) throw new Error("GOAL_NOT_FOUND");
       if (goal.projectId !== board.projectId) throw new Error("CROSS_PROJECT");
-      if (goal.sprintId !== board._id) throw new Error("GOAL_NOT_IN_SPRINT");
+      if (!(await linkOf(ctx, goal._id, board._id))) throw new Error("GOAL_NOT_IN_SPRINT");
     }
     if (!(await isProjectMember(ctx, board.projectId, args.assigneeId))) {
       throw new Error("ASSIGNEE_NOT_A_MEMBER");
@@ -815,4 +855,3 @@ export const deleteTask = mutation({
     return null;
   },
 });
-

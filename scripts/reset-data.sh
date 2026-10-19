@@ -55,7 +55,7 @@ fi
 # them would fail and make this script report a false error.
 TABLES=(
   users sessions projects projectMembers joinRequests
-  boards columns labels goals tasks goalTasks
+  boards columns labels goals goalSprints tasks goalTasks
   checklistItems attachments activityLog burndown
 )
 

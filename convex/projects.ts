@@ -949,6 +949,13 @@ export const purgeProject = internalMutation({
         .collect();
       for (const link of links) await ctx.db.delete(link._id);
     }
+    // 目标项 ↔ 迭代 的多对多归属也要清（按项目一次取全）。
+    for (const link of await ctx.db
+      .query("goalSprints")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect()) {
+      await ctx.db.delete(link._id);
+    }
     const allTasks = await ctx.db
       .query("tasks")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))

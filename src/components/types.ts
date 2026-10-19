@@ -31,7 +31,8 @@ export type Goal = {
   title: string;
   /** A reference to the category; name and colour live on the label row. */
   labelId?: Id<"labels">;
-  sprintId?: Id<"boards">;
+  /** 这个目标项排入的全部迭代（按排入时间升序；可以属于多个迭代）。 */
+  sprintIds: Id<"boards">[];
   /** 客户价值估计 — 1~10 的相对价值刻度，发布燃尽图的纵轴单位。 */
   value?: number;
   columnId: Id<"columns">;

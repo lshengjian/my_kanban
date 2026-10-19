@@ -171,7 +171,7 @@ npx convex deploy       # 产品版
 ## 项目结构
 
 ```
-convex/           后端：schema（15 张表）+ 各领域云函数 + lib/ 共享逻辑
+convex/           后端：schema（16 张表）+ 各领域云函数 + lib/ 共享逻辑
 src/
   backend.ts      两个后端（dev/prod）的定义与切换
   main.tsx        入口：按 env 选 Convex client → Provider → App

@@ -112,14 +112,14 @@ npx convex import --table <t> --replace --yes <file>  # ⚠️ 整表覆盖
   AGENTS.md              本文件 —— 面向 Agent 的唯一事实来源
   README.md              面向使用者的说明：功能、安装、部署、环境切换
   docs/
-    软件设计说明书.md      架构、接口契约、15 张表、各模块详细说明、不变量
+    软件设计说明书.md      架构、接口契约、16 张表、各模块详细说明、不变量
     维护手册.md           安装、部署、数据导出/导入、故障排查、运维红线
   .env.local.example     环境变量模板（可提交；.env.local 本身已 gitignore）
   wrangler.toml          Cloudflare Pages 配置（name=kb-app，输出 dist/）
   .aud.mjs               Playwright 巡检辅助（见 §10）
   index.html / vite.config.ts / tsconfig.json / package.json
 convex/                  后端（Convex 函数 + 数据模型）
-  schema.ts              全部 15 张表定义与索引 —— 改数据结构先改这里
+  schema.ts              全部 16 张表定义与索引 —— 改数据结构先改这里
   auth.ts                注册/登录/登出/me + 管理员用户管理
   projects.ts            项目、成员、加入申请、邀请、邀请码
   boards.ts              看板查询与创建（含列/泳道组装、默认标签播种）
@@ -137,6 +137,7 @@ convex/                  后端（Convex 函数 + 数据模型）
     activity.ts          logActivity + ActivityType（13 种）
     labelPresets.ts      normalizeColor + seedDefaultLabels
     board.ts             columnsOfBoard
+    goalSprints.ts       目标项 ↔ 迭代 多对多归属（linksOfGoal / addGoalToSprint / groupLinks）
   _generated/            Convex 生成物，不要手改；schema 变更后由 convex dev 重新生成
 src/
   main.tsx               Root：按 env 选 Convex client → ConvexProvider → App
@@ -162,7 +163,7 @@ snapshots/               数据快照（已 gitignore）
 
 ---
 
-## 4. 数据模型（15 张表）
+## 4. 数据模型（16 张表）
 
 完整定义见 `convex/schema.ts`。索引是查询性能的关键，**新增查询前先确认有可用索引**。
 
@@ -176,7 +177,8 @@ snapshots/               数据快照（已 gitignore）
 | `boards` | 看板。`kind: backlog\|sprint`，sprint 带日期/编号/goal | `by_project`, `by_project_kind` |
 | `labels` | 卡片类型。`scope: system\|project` | `by_board`, `by_board_position`, `by_scope_kind(_position)` |
 | `columns` | **仅**产品列表的三列，`isDone` 标记终态 | `by_board`, `by_board_position` |
-| `goals` | 目标项。`labelId` 引用、`sprintId?`（有值 ⇒ 处理中）、`value?` 1–10 | `by_board_column`, `by_board`, `by_column`, `by_project`, `by_label`, `by_sprint` |
+| `goals` | 目标项。`labelId` 引用、`value?` 1–10；**排入哪些迭代看 `goalSprints`** | `by_board_column`, `by_board`, `by_column`, `by_project`, `by_label` |
+| `goalSprints` | 目标项 ↔ 迭代 **多对多**（可排入多个**未结束**的迭代）。`countsForValue` 标记**首个**排入的迭代 —— 客户价值只归它一次 | `by_goal`, `by_sprint`, `by_project`, `by_goal_sprint` |
 | `tasks` | 任务项。`status`、`startDate?`、`estimatedHours?`、`actualCompletedAt?`、`actualHours?` | `by_board`, `by_project`, `by_assignee`, `by_label` |
 | `goalTasks` | 目标项 ↔ 任务项 **多对多** | `by_goal`, `by_task`, `by_project` |
 | `checklistItems` | 检查项（目标项验收条件） | `by_goal`（含 position）, `by_project` |
@@ -251,12 +253,18 @@ snapshots/               数据快照（已 gitignore）
   `endDate <= startDate` → `INVALID_SPRINT_RANGE`。
 - 新建迭代弹窗里**开始与结束日期都有默认值、都可以改**（`defaultSprintDates()`，开始默认下一个周一），
   方便把缓冲时间留出来应付突发情况与常规会议。
-- **排入迭代（`planGoalToSprint`）只允许 未开始 的迭代** —— 迭代一旦开始，范围冻结（`SPRINT_NOT_PLANNED`）。
-- **移出迭代**（`sprintId: undefined`）会连带删除该目标项的任务：任务属于迭代，会变孤儿；
-  但**检查项与附件跟随目标项，保留不动**。
-  ⚠️ **因此「移出迭代」是 owner 专属**（`requireProjectOwnerOf`），一般成员只能排入、不能撤出 ——
-  否则任何人都能连带删掉别人登记的任务。2026-10-13 修：在此之前它只要求「是项目成员」。
-  前端也用两步 `ConfirmButton` 提示「确认移出并删除任务」，别把确认文案改回单纯「移出迭代」。
+- **一个目标项可以排入多个迭代**（`goalSprints` 多对多，2026-10-19 起）。归属写在
+  `goalSprints`（`goalId`/`sprintId`/`countsForValue`），`goals` 表里**没有** `sprintId` 字段了。
+  只要目标项服务的迭代**还没结束**，就能继续加入；迭代一旦结束（`deriveSprintStatus === "closed"`）
+  才拒绝（`SPRINT_CLOSED`）。⚠️ 2026-10-19 之前是「迭代一旦**开始**就冻结」（`SPRINT_NOT_PLANNED`），
+  现在**进行中的迭代也可以继续排入**。
+- **`countsForValue`**：首个排入的迭代标 `true`，客户价值只归它一次；删除归属时转给剩下的最早一个，
+  保证任何时刻至多一条为 `true`。
+- **移出某个迭代**（`planGoalToSprint({ sprintId, remove: true })`）会删除**该迭代里属于这个目标项**的任务
+  （任务属于迭代，会变孤儿）；**检查项与附件跟随目标项，保留不动**。
+  ⚠️ **因此移出是 owner 专属**（`requireProjectOwnerOf`），一般成员只能排入、不能撤出 ——
+  否则任何人都能连带删掉别人登记的任务。前端用两步 `ConfirmButton` 提示「确认移出并删除任务」，
+  归属面板（`PlanModal`）里按迭代逐个移出。兼容旧前端：只传 `goalId`（无 `sprintId`）= 从所有迭代移出。
 - 迭代名称留空时服务端自动命名为 `迭代 N`（N = 现有最大编号 + 1）。
 
 ### 卡片类型 / 标签（`labels.ts`, `templates.ts`, `lib/labelPresets.ts`）
@@ -400,8 +408,9 @@ owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加�
 - **activity.ts**：`listActivity`（项目全部事件）`listGoalActivity`（单个目标项）—— 两者都**按时间倒序**返回
 - **progress.ts**：`getProjectProgress` `getSprintBurndown` `getReleaseBurndown` `snapshotBurndown`（另 re-export `columnsOfBoard`）
 
-- `planGoalToSprint` 一个函数两种权限：**排入**只要项目成员，**移出**（`sprintId: undefined`，
-  会删任务）要 owner。改这个函数时别把两道守卫合并成一道。
+- `planGoalToSprint` 一个函数两种权限：**排入**（`{goalId, sprintId}`）只要项目成员，**移出**
+  （`{goalId, sprintId, remove: true}`，会删该迭代里属于它的任务）要 owner；旧式 `{goalId}`
+  （无 sprintId）= 从所有迭代移出。改这个函数时别把两道守卫合并成一道。
 - 两个契约细节（改之前先读 §5）：
   `createGoal` / `createTask` 的 `labelId` 是**可选**参数（新建只给名称，类别后置）；
   `boards.getBoard` 同时返回 `labels`（本看板词表，供任务项）与 `goalLabels`（预期成果看板词表，供目标项）。
@@ -579,7 +588,7 @@ owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加�
 | `backup-deployments.sh` | **schema 变更前的强制备份**：dev + prod 全量导出 | 只读 | `bash scripts/backup-deployments.sh [--files]`（见 §12） |
 | `project-snapshot.mjs` | 备份/恢复示例项目（`复刻雷电游戏`） | backup 只读；**restore 用 `--replace` 整表覆盖** | `node scripts/project-snapshot.mjs backup [--project X]` / `... restore` |
 | `purge-except.mjs` | 只保留指定项目及其成员用户 | ⛔ **破坏性**，文件头声明 2026-10-10 起禁止对生产库使用 | `ALLOW_PURGE=1 node scripts/purge-except.mjs [项目名]`（未设 `ALLOW_PURGE=1` 直接 exit 1） |
-| `reset-data.sh` | 清空 **15 张表**，为了「首位注册用户即 admin」引导 —— **只用于 dev** | ⛔ **破坏性**；`--prod` **默认被脚本拒绝**（需显式 `ALLOW_PROD_RESET=1`），生产库数据不许清 | `bash scripts/reset-data.sh`（dev）；`--prod` 仅限已备份并确认后 |
+| `reset-data.sh` | 清空 **16 张表**，为了「首位注册用户即 admin」引导 —— **只用于 dev** | ⛔ **破坏性**；`--prod` **默认被脚本拒绝**（需显式 `ALLOW_PROD_RESET=1`），生产库数据不许清 | `bash scripts/reset-data.sh`（dev）；`--prod` 仅限已备份并确认后 |
 | `migrate-label-id.mjs` | 一次性：`labelTemplates` → `labels` 双 scope，`labelName` → `labelId` | ⛔ `--replace`；**必须在 schema 切换前跑，且已执行过，勿重跑** | `node scripts/migrate-label-id.mjs` |
 | `migrate-customer-value.mjs` | 一次性：`goals.storyPoints` → `goals.value` | 非破坏性（逐行调 `updateGoal`，不做 `--replace`）；**已执行过** | `CONVEX_URL=<url> node scripts/migrate-customer-value.mjs <token>` |
 | `.aud.mjs`（仓库根，未被 gitignore 覆盖） | Playwright 巡检辅助：底栏遮挡、横向溢出、左右越界、点击区 <32px | 只读 | `import { run } from "./.aud.mjs"`，`await run(page, label)` |
@@ -628,14 +637,6 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   移列、移出迭代、改看板标签），所以 `src/lib/ui.ts` 里的文案必须是**通用**的
   （现在：「只有项目经理可以执行此操作」）。2026-10-13 之前写的是「只有项目经理可以修改看板标签」，
   导致加目标项被拒时提示的是标签的事。
-
-**尚未实现（用户已提出，设计已定）**
-
-- **一个目标项只能属于一个迭代**（`goals.sprintId` 是单值）。用户要的是「一个目标项可以出现在多个
-  迭代里，首次排入的那个迭代拥有它的价值，之后只占工作时间」。已确定的做法：新增 `goalSprints`
-  多对多表（含 `countsForValue` 布尔，首个为 true、可在界面手改），删掉 `goals.sprintId`，
-  并把 ~25 处 `goal.sprintId === board._id` 的成员判断改成查关联表。
-  **注意这是结构变更，要走 §12 流程**（且删 `sprintId` 要按 §12「删字段分三次推送」来做）。
 
 **前端**
 
