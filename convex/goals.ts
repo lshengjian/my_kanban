@@ -178,9 +178,8 @@ export const createGoal = mutation({
     const user = await requireUser(ctx, args.token);
     const { board } = await requireBoardMember(ctx, args.boardId, user._id);
     if (board.kind !== "backlog") throw new Error("GOALS_LIVE_IN_PRODUCT_LIST");
-    // The product list is the owner's backlog: members work the sprints, they
-    // do not author what goes into them.
-    await requireProjectOwnerOf(ctx, board.projectId, user._id);
+    // 项目成员都可以往预期成果看板加目标项（2026-10-19 放开；此前只有 owner）。
+    // 注意「改迭代」是另一回事 —— 建/改迭代仍然只有 owner 能做。
 
     const title = args.title.trim();
     if (title.length < 1 || title.length > MAX_TITLE) throw new Error("INVALID_TITLE");

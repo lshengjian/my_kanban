@@ -8,6 +8,7 @@ import {
   publicUserValidator,
   requireBoardMember,
   requireProjectMember,
+  requireProjectOwner,
   requireProjectOwnerOf,
   requireUser } from "./lib/auth";
 import { columnsOfBoard } from "./lib/board";
@@ -569,7 +570,10 @@ export const updateBoard = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await requireUser(ctx, args.token);
-    const { board } = await requireBoardMember(ctx, args.boardId, user._id);
+    // 迭代信息（名称/目标/起止日期/归档）只有项目 owner 能改 —— 与「新建迭代」
+    // 同一条线；普通成员可以加目标项/任务项，但不改迭代本身（2026-10-19 收紧，
+    // 此前误放开到所有成员）。
+    const board = await requireProjectOwner(ctx, args.boardId, user._id);
 
     const patch: Record<string, unknown> = {};
     if (args.name !== undefined) {

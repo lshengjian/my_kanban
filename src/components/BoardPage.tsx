@@ -217,7 +217,8 @@ function ProductList({
                 </article>
               ))}
 
-              {column._id === intakeColumnId && isOwner && (
+              {/* 项目成员都可以新增目标项（2026-10-19 放开）；只有「移到」列仍限 owner。 */}
+              {column._id === intakeColumnId && (
                 <div className="quick-add">
                   <input
                     className="input"

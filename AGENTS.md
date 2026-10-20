@@ -196,6 +196,7 @@ snapshots/               数据快照（已 gitignore）
 
 - **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；所在列由 owner **手工移动**（见下一节）。
 - **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
+- **新增权限（2026-10-19）**：加目标项、加任务项**项目成员都可以**；新建/修改迭代只有项目 owner 能。
 - 一个任务可以服务多个目标项（`goalTasks` 多对多）。**任务详情（`TaskEditor`）里可以改这组关联**：
   勾选/取消即**整体替换**集合（用来去掉当初选错的多余目标项），至少保留 1 个（`GOAL_REQUIRED`），
   且每个目标项都必须排在该任务所属的迭代里（`GOAL_NOT_IN_SPRINT`）。
@@ -359,7 +360,7 @@ snapshots/               数据快照（已 gitignore）
 | `requireAdmin` | 全局管理员 | `FORBIDDEN` |
 | `requireProjectMember` | **写权限的唯一依据**：必须是项目成员 | `PROJECT_NOT_FOUND` / `NOT_A_PROJECT_MEMBER` |
 | `requireBoardMember` | 由看板反查项目并要求成员 | `BOARD_NOT_FOUND` |
-| `requireProjectOwnerOf` | 项目 owner 专属：建看板、加目标项、移动目标项所在列、移出迭代 | `PROJECT_OWNER_ONLY` |
+| `requireProjectOwnerOf` | 项目 owner 专属：**新建迭代、改迭代信息**、移动目标项所在列、移出迭代 | `PROJECT_OWNER_ONLY` |
 | `requireLabelEditor` | 系统预设要 admin；项目标签要 owner | `FORBIDDEN` / `PROJECT_OWNER_ONLY` |
 | `requireColumnOfBoard` | 列必须属于该看板 | `COLUMN_NOT_FOUND` |
 
@@ -382,9 +383,13 @@ owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加�
 `getProject` 把 `pendingRequests` 返回给**所有成员**，`decideJoinRequest` / `inviteUser` / `updateProject`
 服务端也只要求「是成员」，而 UI 只对 owner 显示这些入口。服务端并未强制 owner。
 
-**迭代设置对所有项目成员开放（2026-10-14 起）**：`boards.updateBoard`（改名称/目标/起止日期/归档）
-服务端本来就只要求「是项目成员」，此前 UI 只给 owner 显示 ⚙；现在成员也能打开并修改。
-**新建迭代（建看板）仍是 owner 专属**（`requireProjectOwnerOf`），别把两者混在一起。
+**「加卡片」与「改迭代」是两条线（2026-10-19 定稿）**：
+- **加目标项 / 加任务项对项目成员开放** —— `createGoal` 不再要求 owner（此前是 owner 专属），
+  `createTask` 本来就是成员级。前端：预期成果看板的「＋ 新增目标项」输入框、迭代看板的
+  「＋ 新增任务项」对成员可见。
+- **新建迭代 + 修改迭代信息只给项目 owner** —— `createBoard` 与 `updateBoard`（名称/目标/起止日期/归档）
+  都走 owner 守卫；UI 的「＋ 新建迭代」与 ⚙ 迭代设置也只给 owner 显示
+  （2026-10-14 曾把 ⚙ 放开给成员，2026-10-19 按需求收回）。别把这两条线混在一起。
 
 ---
 
@@ -494,8 +499,8 @@ owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加�
   新建迭代时开始/结束日期都有默认值（下一个周一 + 周期 − 1 天），并**都可以手工改**；
   ⚠️ 两个「＋ 新建迭代」入口（页头按钮与虚线卡片）**都必须走 `openNewBoard()`** 才有默认日期
   —— 虚线卡片曾直接 `setShowBoard(true)`，日期是空的（2026-10-14 修）。
-  **迭代设置 ⚙ 对所有项目成员显示**（可改名称/迭代目标/起止日期，弹窗里日期按当前值回填）；
-  项目设置与新建迭代仍只给 owner。
+  **迭代设置 ⚙ 只给项目 owner**（可改名称/迭代目标/起止日期，弹窗里日期按当前值回填；
+  2026-10-19 收回，成员只能加目标项/任务项）；项目设置与新建迭代同样只给 owner。
   UI **只能新建迭代**（类型选择器过滤掉 backlog），文案说明 backlog 由创建项目时自动生成。
 - `ProjectsPage.tsx`：我的项目 / 全部项目（仅 admin）双 scope、创建项目、6 位邀请码加入、邀请处理、分页（PAGE_SIZE 10）。
   管理员在「全部项目」下另有顶部汇总（项目/看板/目标项，来自 `auth.adminStats`，仅在 admin 且 scope=all 时查）
@@ -636,10 +641,10 @@ Convex 原生快照：`README.md` + `_tables/documents.jsonl`（每行一个文�
   这是产品环境可用性的前提，不是可选优化。
 - `convex/progress.ts` 的 `effortStats` 与 `listTasks` 的 **returns 校验器**里 `labelId` 仍是 `v.optional` —— 这是对的
   （历史数据可能无类别），不要跟着 args 一起收紧。
-- `PROJECT_OWNER_ONLY` 这个码被 `requireProjectOwnerOf` 的**所有**调用点共用（建看板、加目标项、
+- `PROJECT_OWNER_ONLY` 这个码被 `requireProjectOwnerOf` 的**所有**调用点共用（新建迭代、改迭代信息、
   移列、移出迭代、改看板标签），所以 `src/lib/ui.ts` 里的文案必须是**通用**的
   （现在：「只有项目经理可以执行此操作」）。2026-10-13 之前写的是「只有项目经理可以修改看板标签」，
-  导致加目标项被拒时提示的是标签的事。
+  导致加目标项被拒时提示的是标签的事；注意加目标项已于 2026-10-19 放开给成员，不再用这个码。
 
 **前端**
 

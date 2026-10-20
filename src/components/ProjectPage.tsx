@@ -364,24 +364,26 @@ export default function ProjectPage({
                     <h3>{board.name}</h3>
                     <div className="spacer" />
                     <Badge color={meta.color} soft>{meta.label}</Badge>
-                    {/* 迭代设置对所有项目成员开放（不是 owner 专属）：服务端
-                        updateBoard 本来就只要求「是项目成员」。 */}
-                    <button
-                      className="btn btn-ghost btn-icon btn-sm"
-                      title="迭代设置"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSettingsFor({
-                          _id: board._id,
-                          name: board.name,
-                          goal: board.goal,
-                          startDate: board.startDate,
-                          endDate: board.endDate,
-                        });
-                      }}
-                    >
-                      ⚙
-                    </button>
+                    {/* 迭代设置只给项目 owner（与「新建迭代」同一条线）：成员可以加
+                        目标项/任务项，但不改迭代本身（2026-10-19 收紧）。 */}
+                    {canManage && (
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm"
+                        title="迭代设置"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSettingsFor({
+                            _id: board._id,
+                            name: board.name,
+                            goal: board.goal,
+                            startDate: board.startDate,
+                            endDate: board.endDate,
+                          });
+                        }}
+                      >
+                        ⚙
+                      </button>
+                    )}
                   </div>
                   {board.goal ? (
                     <div className="muted" style={{ fontSize: 13 }}>🎯 {board.goal}</div>
