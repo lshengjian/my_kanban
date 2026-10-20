@@ -795,6 +795,9 @@ export const updateTask = mutation({
     dueDate: v.optional(v.number()),
     // Explicit null clears the category; omitting it leaves it unchanged.
     labelId: v.optional(v.union(v.id("labels"), v.null())),
+    // 关联目标项：传值就**整体替换**（可去掉选错的多余项）。至少 1 个，
+    // 且必须都在这个任务所属的迭代里（§5 的不变量）。
+    goalIds: v.optional(v.array(v.id("goals"))),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -822,6 +825,39 @@ export const updateTask = mutation({
     if (args.labelId !== undefined) {
       patch.labelId =
         args.labelId === null ? undefined : await labelOfBoard(ctx, task.boardId, args.labelId);
+    }
+
+    if (args.goalIds !== undefined) {
+      const unique = [...new Set(args.goalIds)];
+      if (unique.length === 0) throw new Error("GOAL_REQUIRED");
+      for (const goalId of unique) {
+        const goal = await ctx.db.get(goalId);
+        if (!goal) throw new Error("GOAL_NOT_FOUND");
+        if (goal.projectId !== task.projectId) throw new Error("CROSS_PROJECT");
+        if (!(await linkOf(ctx, goal._id, task.boardId))) throw new Error("GOAL_NOT_IN_SPRINT");
+      }
+
+      // 同步 `goalTasks`：删掉不在新集合里的（选错的多余项），补上新增的。
+      const existing = await ctx.db
+        .query("goalTasks")
+        .withIndex("by_task", (q) => q.eq("taskId", task._id))
+        .collect();
+      const keep = new Set(unique.map((id) => id as string));
+      const had = new Set<string>();
+      for (const link of existing) {
+        had.add(link.goalId as string);
+        if (!keep.has(link.goalId as string)) await ctx.db.delete(link._id);
+      }
+      for (const goalId of unique) {
+        if (had.has(goalId as string)) continue;
+        await ctx.db.insert("goalTasks", {
+          projectId: task.projectId,
+          goalId,
+          taskId: task._id,
+          createdBy: user._id,
+          createdAt: Date.now(),
+        });
+      }
     }
 
     if (Object.keys(patch).length > 1) await ctx.db.patch(args.taskId, patch);

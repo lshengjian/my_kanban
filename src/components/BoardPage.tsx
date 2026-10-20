@@ -614,11 +614,27 @@ function TaskEditor({
   const [assignee, setAssignee] = useState<string>(task.assigneeId);
   const [due, setDue] = useState(formatDateInput(task.dueDate));
   const [labelId, setLabelId] = useState<string>(task.labelId ?? "");
+  // 关联目标项可在此编辑：取消勾选即可去掉当初选错的多余目标项（至少保留一个）。
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(task.goalIds.map((id) => id as string)),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const toggleGoal = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   const save = async () => {
     if (!title.trim() || !due) return;
+    if (selected.size === 0) {
+      setError("每个任务项至少要关联一个目标项");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -629,6 +645,7 @@ function TaskEditor({
         assigneeId: assignee as Id<"users">,
         dueDate: new Date(due).getTime(),
         labelId: labelId ? (labelId as Id<"labels">) : null,
+        goalIds: [...selected] as Id<"goals">[],
       });
       onClose();
     } catch (err) {
@@ -642,15 +659,6 @@ function TaskEditor({
     <Modal title="任务项详情" subtitle="所有字段都在这里查看和修改" onClose={onClose}>
       {/* Read-only facts the app records for you. */}
       <dl className="sheet">
-        <div className="sheet-row">
-          <dt>关联目标项</dt>
-          <dd>
-            {goals
-              .filter((g) => task.goalIds.includes(g._id))
-              .map((g) => g.title)
-              .join("、") || "—"}
-          </dd>
-        </div>
         <div className="sheet-row">
           <dt>实际开始日期</dt>
           <dd>{task.startDate === undefined ? "尚未开始" : formatDate(task.startDate)}</dd>
@@ -726,6 +734,30 @@ function TaskEditor({
             ))}
           </select>
         </div>
+        <div className="field">
+          <label>关联目标项 *（可多选）</label>
+          {goals.length === 0 ? (
+            <p className="muted">本迭代还没有目标项，请先从预期成果看板排入。</p>
+          ) : (
+            <>
+              <div className="stack">
+                {goals.map((g) => (
+                  <label className="checkline" key={g._id}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(g._id as string)}
+                      onChange={() => toggleGoal(g._id as string)}
+                    />
+                    {g.title}
+                  </label>
+                ))}
+              </div>
+              <span className="faint" style={{ fontSize: 11.5 }}>
+                取消勾选即可删掉当初选错的目标项；至少保留一个。
+              </span>
+            </>
+          )}
+        </div>
         {error && <div className="error-text">{error}</div>}
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn" onClick={onClose}>
@@ -734,7 +766,7 @@ function TaskEditor({
           <button
             className="btn btn-primary"
             onClick={save}
-            disabled={busy || !title.trim() || !due}
+            disabled={busy || !title.trim() || !due || selected.size === 0}
           >
             {busy ? "保存中…" : "保存"}
           </button>

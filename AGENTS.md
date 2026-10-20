@@ -196,7 +196,9 @@ snapshots/               数据快照（已 gitignore）
 
 - **目标项**活在预期成果看板里，**没有负责人、没有截止日期**；所在列由 owner **手工移动**（见下一节）。
 - **任务项**活在某个迭代里，**必须有负责人、必须有预计完成日期、必须关联 ≥1 个目标项**；关联的目标项必须属于同一迭代。
-- 一个任务可以服务多个目标项（`goalTasks` 多对多）。
+- 一个任务可以服务多个目标项（`goalTasks` 多对多）。**任务详情（`TaskEditor`）里可以改这组关联**：
+  勾选/取消即**整体替换**集合（用来去掉当初选错的多余目标项），至少保留 1 个（`GOAL_REQUIRED`），
+  且每个目标项都必须排在该任务所属的迭代里（`GOAL_NOT_IN_SPRINT`）。
 - **卡片不填描述**：目标项与任务项都只以名称表达。UI 里没有任何描述输入框，
   schema 里也**没有** `description` 字段（`goals.description` 已于 2026-10-13 删除）。
 - **新建卡片只要名称，类别后置**：新增目标项只有一个名称输入框；新增任务项只收名称 / 负责人 /
@@ -400,6 +402,7 @@ owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加�
 - **goals.ts**：`createGoal` `updateGoal` `deleteGoal` `reorderGoal` `planGoalToSprint`
   `moveGoal`（owner 手工移动列，记日志）
   `effortStats` `listTasks` `createTask` `setTaskStatus` `updateTask` `deleteTask`
+  （`updateTask` 的 `goalIds?` 传入即**整体替换**该任务的关联目标项；至少 1 个、必须同迭代）
   （导出内部复用：`tasksOfGoal` `syncGoalStatus` `applyColumn` `customerValue` `tasksOfSprint` `goalIdsOfTask`）
 - **labels.ts**：`listLabels` `createLabel` `updateLabel` `deleteLabel` `moveLabel`
 - **templates.ts**：`listTemplates` `createTemplate` `updateTemplate` `deleteTemplate`
@@ -465,7 +468,7 @@ owner/member。前端「拥有者」徽章（`role === "owner"`）与「可加�
   | 卡片 | 新建 | 修改类别 | 用哪套词表 |
   | --- | --- | --- | --- |
   | 目标项 | `ProductList` 的单行输入框（**只在「待处理」列渲染**） | `GoalDrawer`（抽屉，选中即存） | `data.goalLabels` |
-  | 任务项 | `NewTaskModal`（名称/负责人/期限/关联目标项；**负责人默认＝当前登录用户**） | `TaskEditor`（「未分类」可清空） | `data.labels` |
+  | 任务项 | `NewTaskModal`（名称/负责人/期限/关联目标项；**负责人默认＝当前登录用户**） | `TaskEditor`（标题/负责人/期限/类别/**关联目标项可勾选增删**；类别「未分类」可清空） | `data.labels` |
 
   `GoalDrawer` 的字段**顺序固定为**：标题 / 类别 / 客户价值估计 / 检查列表 / 附件 / **变更历史（永远放最后）**
   —— 变更历史是只读追溯信息，不该挡在检查列表、附件这些要动手的内容前面。**没有描述**
